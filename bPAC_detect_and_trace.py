@@ -6,63 +6,60 @@ from skimage import exposure
 import argparse
 from matplotlib.widgets import Button
 from matplotlib.patches import Polygon
+from matplotlib.path import Path
 
 def load_tif_stack(tif_path):
     """
-    Load a tif stack from the specified path.
+    Load a tif stack from the given path.
     
     Parameters:
     -----------
     tif_path : str
         Path to the tif stack file
-    
+        
     Returns:
     --------
     numpy.ndarray
         The loaded tif stack
     """
-    if not os.path.isfile(tif_path):
-        raise FileNotFoundError(f"Tif file not found at: {tif_path}")
-    
     print(f"Loading tif stack from: {tif_path}")
     stack = imread(tif_path)
     print(f"Loaded stack with shape: {stack.shape}")
     return stack
 
-def create_heatmaps(stack, z_range1, z_range2):
+def create_heatmaps(stack, z1_range, z2_range):
     """
-    Create average and ratio heatmaps from the tif stack.
+    Create average and ratio heatmaps from the stack.
     
     Parameters:
     -----------
     stack : numpy.ndarray
-        The loaded tif stack
-    z_range1 : tuple
-        (start, end) for the first z-range
-    z_range2 : tuple
-        (start, end) for the second z-range
-    
+        The image stack
+    z1_range : tuple
+        (start, end) of first z-range
+    z2_range : tuple
+        (start, end) of second z-range
+        
     Returns:
     --------
     tuple
         (average_heatmap, ratio_heatmap)
     """
-    # Create average heatmap (average across all z)
-    average_heatmap = np.mean(stack, axis=0)
+    z1_start, z1_end = z1_range
+    z2_start, z2_end = z2_range
     
-    # Create ratio heatmap
-    avg1 = np.mean(stack[z_range1[0]:z_range1[1]], axis=0)
-    avg2 = np.mean(stack[z_range2[0]:z_range2[1]], axis=0)
-    ratio_heatmap = avg1 / avg2
+    # Calculate average for each z-range
+    avg1 = np.mean(stack[z1_start:z1_end], axis=0)
+    avg2 = np.mean(stack[z2_start:z2_end], axis=0)
     
-    # Handle division by zero
-    ratio_heatmap[~np.isfinite(ratio_heatmap)] = 0
+    # Calculate ratio (z1_range divided by z2_range)
+    ratio = avg1 / (avg2 + 1e-10)  # Add small constant to avoid division by zero
     
-    return average_heatmap, ratio_heatmap
+    return avg1, ratio
 
 def stretch_heatmaps(average_heatmap, ratio_heatmap):
     """
-    Stretch the heatmaps using skimage exposure.
+    Stretch the heatmaps to use the full range.
     
     Parameters:
     -----------
@@ -70,100 +67,101 @@ def stretch_heatmaps(average_heatmap, ratio_heatmap):
         The average heatmap
     ratio_heatmap : numpy.ndarray
         The ratio heatmap
-    
+        
     Returns:
     --------
     tuple
         (stretched_average, stretched_ratio)
     """
-    # Stretch the heatmaps
-    p2_average, p98_average = np.percentile(average_heatmap, (2, 98))
-    p2_ratio, p98_ratio = np.percentile(ratio_heatmap, (2, 98))
+    # Stretch average heatmap
+    p2, p98 = np.percentile(average_heatmap, (2, 98))
+    stretched_average = exposure.rescale_intensity(average_heatmap, in_range=(p2, p98))
     
-    stretched_average = exposure.rescale_intensity(average_heatmap, 
-                                                 in_range=(p2_average, p98_average))
-    stretched_ratio = exposure.rescale_intensity(ratio_heatmap, 
-                                               in_range=(p2_ratio, p98_ratio))
+    # Stretch ratio heatmap
+    p2, p98 = np.percentile(ratio_heatmap, (2, 98))
+    stretched_ratio = exposure.rescale_intensity(ratio_heatmap, in_range=(p2, p98))
     
     return stretched_average, stretched_ratio
 
-def get_top_pixels(ratio_heatmap, n_pixels=1000):
+def get_top_pixels(ratio_heatmap, n=1000):
     """
-    Get the coordinates of the top n pixels with highest ratio values.
+    Get the coordinates of the top n pixels in the ratio heatmap.
     
     Parameters:
     -----------
     ratio_heatmap : numpy.ndarray
         The ratio heatmap
-    n_pixels : int
+    n : int
         Number of top pixels to select
-    
+        
     Returns:
     --------
     tuple
         (y_coords, x_coords) of the top n pixels
     """
-    # Flatten the ratio heatmap and get indices of top n pixels
-    flat_indices = np.argsort(ratio_heatmap.flatten())[-n_pixels:]
+    # Flatten the heatmap and get indices of top n pixels
+    flat_indices = np.argsort(ratio_heatmap.flatten())[-n:]
     
-    # Convert flat indices to 2D coordinates
+    # Convert to 2D coordinates
     y_coords, x_coords = np.unravel_index(flat_indices, ratio_heatmap.shape)
     
     return y_coords, x_coords
 
 def extract_and_normalize_traces(stack, y_coords, x_coords):
     """
-    Extract and normalize traces for the specified coordinates.
+    Extract and normalize traces for the given coordinates.
     
     Parameters:
     -----------
     stack : numpy.ndarray
-        The loaded tif stack
+        The image stack
     y_coords : numpy.ndarray
         Y coordinates of pixels
     x_coords : numpy.ndarray
         X coordinates of pixels
-    
+        
     Returns:
     --------
     numpy.ndarray
-        Normalized traces for the specified pixels
+        Normalized traces
     """
     # Extract traces
-    traces = stack[:, y_coords, x_coords]
+    traces = []
+    for y, x in zip(y_coords, x_coords):
+        trace = stack[:, y, x]
+        traces.append(trace)
     
-    # Normalize each trace to [0, 1]
-    trace_mins = np.min(traces, axis=0)
-    trace_maxs = np.max(traces, axis=0)
-    normalized_traces = (traces - trace_mins) / (trace_maxs - trace_mins)
+    # Convert to array and normalize
+    traces = np.array(traces)
+    traces = (traces - traces.mean(axis=1, keepdims=True)) / traces.std(axis=1, keepdims=True)
     
-    return normalized_traces
+    return traces
 
 def create_mask_image(shape, y_coords, x_coords):
     """
-    Create a binary mask image for the top pixels.
+    Create a mask image with the selected pixels.
     
     Parameters:
     -----------
     shape : tuple
-        Shape of the output mask image
+        Shape of the mask image
     y_coords : numpy.ndarray
         Y coordinates of pixels
     x_coords : numpy.ndarray
         X coordinates of pixels
-    
+        
     Returns:
     --------
     numpy.ndarray
-        Binary mask image
+        The mask image
     """
-    mask = np.zeros(shape, dtype=np.uint8)
-    mask[y_coords, x_coords] = 1
+    mask = np.zeros(shape, dtype=bool)
+    mask[y_coords, x_coords] = True
     return mask
 
-def plot_results(stretched_average, stretched_ratio, normalized_traces, mask_image, y_coords, x_coords):
+def plot_results(stretched_average, stretched_ratio, normalized_traces, mask_image, y_coords, x_coords, channel_name):
     """
-    Create a figure with four subplots showing the results.
+    Plot the results.
     
     Parameters:
     -----------
@@ -172,46 +170,48 @@ def plot_results(stretched_average, stretched_ratio, normalized_traces, mask_ima
     stretched_ratio : numpy.ndarray
         The stretched ratio heatmap
     normalized_traces : numpy.ndarray
-        Normalized traces for top pixels
+        The normalized traces
     mask_image : numpy.ndarray
-        Binary mask image for top pixels
+        The mask image
     y_coords : numpy.ndarray
         Y coordinates of top pixels
     x_coords : numpy.ndarray
         X coordinates of top pixels
+    channel_name : str
+        Name of the channel (ChanA or ChanB)
     """
-    fig = plt.figure(figsize=(15, 12))
-    gs = fig.add_gridspec(2, 2)
+    # Create figure with GridSpec for custom layout
+    fig = plt.figure(figsize=(15, 10))
+    gs = plt.GridSpec(2, 2, figure=fig)
     
-    # Create subplots in new arrangement
+    # Place subplots
     ax1 = fig.add_subplot(gs[0, 0])  # Ratio heatmap
-    ax2 = fig.add_subplot(gs[0, 1])  # Mask
-    ax3 = fig.add_subplot(gs[1, 0])  # Traces
+    ax2 = fig.add_subplot(gs[0, 1])  # Mask image
+    ax3 = fig.add_subplot(gs[1, 0])  # Normalized traces
     ax4 = fig.add_subplot(gs[1, 1])  # Average heatmap with red dots
     
     # Plot ratio heatmap
     im1 = ax1.imshow(stretched_ratio, cmap='viridis')
     ax1.set_title('Ratio Heatmap')
-    plt.colorbar(im1, ax=ax1, label='Ratio')
+    plt.colorbar(im1, ax=ax1)
     
     # Plot mask image (inverted colors)
-    im2 = ax2.imshow(1 - mask_image, cmap='gray')
-    ax2.set_title('Top 1000 Pixels Mask')
+    ax2.imshow(1 - mask_image, cmap='gray')
+    ax2.set_title('Mask Image')
     
-    # Plot normalized traces (transposed)
-    im3 = ax3.imshow(normalized_traces.T, aspect='auto', cmap='viridis')
-    ax3.set_xlabel('Time (frames)')
-    ax3.set_ylabel('Pixel Index')
-    ax3.set_title('Normalized Traces (Top 1000)')
-    plt.colorbar(im3, ax=ax3, label='Normalized Intensity')
+    # Plot normalized traces
+    ax3.imshow(normalized_traces, aspect='auto', cmap='viridis')
+    ax3.set_title('Normalized Traces')
+    ax3.set_xlabel('Frame')
+    ax3.set_ylabel('Pixel')
     
     # Plot average heatmap with red dots
-    im4 = ax4.imshow(stretched_average, cmap='viridis')
-    ax4.set_title('Average Heatmap with Top 1000 Pixels')
-    plt.colorbar(im4, ax=ax4, label='Intensity')
-    
-    # Add red dots for top pixels
+    ax4.imshow(stretched_average, cmap='viridis')
     ax4.scatter(x_coords, y_coords, c='red', s=1, alpha=0.5)
+    ax4.set_title('Average Heatmap with Top 1000 Pixels')
+    
+    # Add overall title
+    fig.suptitle(f'{channel_name} Analysis', fontsize=16)
     
     plt.tight_layout()
     plt.show()
@@ -232,9 +232,6 @@ def extract_traces_in_polygon(stack, vertices):
     numpy.ndarray
         Array of traces for pixels within the polygon
     """
-    from matplotlib.path import Path
-    import numpy as np
-    
     # Create a grid of all pixel coordinates
     y, x = np.mgrid[0:stack.shape[1], 0:stack.shape[2]]
     points = np.vstack((x.flatten(), y.flatten())).T
@@ -257,27 +254,34 @@ def extract_traces_in_polygon(stack, vertices):
     
     return np.array(traces)
 
-class PolygonDrawer:
-    def __init__(self, ax, image, stack, trace_ax, sum_ax):
-        self.ax = ax
-        self.image = image
-        self.stack = stack
-        self.trace_ax = trace_ax
+class DualChannelPolygonDrawer:
+    def __init__(self, ax_a, ax_b, image_a, image_b, stack_a, stack_b, trace_ax_a, trace_ax_b, sum_ax):
+        self.ax_a = ax_a
+        self.ax_b = ax_b
+        self.image_a = image_a
+        self.image_b = image_b
+        self.stack_a = stack_a
+        self.stack_b = stack_b
+        self.trace_ax_a = trace_ax_a
+        self.trace_ax_b = trace_ax_b
         self.sum_ax = sum_ax
+        
         self.polygon = None
         self.vertices = []
-        self.polygon_patch = None
-        self.lines = []  # Store all line segments
+        self.polygon_patch_a = None
+        self.polygon_patch_b = None
+        self.lines_a = []  # Store all line segments for ChanA
+        self.lines_b = []  # Store all line segments for ChanB
         self.vertex_markers = []  # Store vertex markers
         self.dragged_vertex = None
         self.drag_index = None
         self.is_finished = False
-        self.trace_line = None
+        self.temp_line = None
         
         # Connect events
-        self.cidpress = ax.figure.canvas.mpl_connect('button_press_event', self.on_press)
-        self.cidrelease = ax.figure.canvas.mpl_connect('button_release_event', self.on_release)
-        self.cidmotion = ax.figure.canvas.mpl_connect('motion_notify_event', self.on_motion)
+        self.cidpress = ax_a.figure.canvas.mpl_connect('button_press_event', self.on_press)
+        self.cidrelease = ax_a.figure.canvas.mpl_connect('button_release_event', self.on_release)
+        self.cidmotion = ax_a.figure.canvas.mpl_connect('motion_notify_event', self.on_motion)
         
         # Add clear button
         self.clear_button_ax = plt.axes([0.81, 0.05, 0.1, 0.04])
@@ -290,114 +294,161 @@ class PolygonDrawer:
         self.finish_button.on_clicked(self.finish_polygon)
         
         self.is_drawing = False
-        self.temp_line = None
         
     def add_vertex_marker(self, x, y):
         """Add a draggable vertex marker"""
-        marker, = self.ax.plot(x, y, 'ro', markersize=8, picker=5)
-        self.vertex_markers.append(marker)
-        return marker
+        marker_a, = self.ax_a.plot(x, y, 'ro', markersize=8, picker=5)
+        marker_b, = self.ax_b.plot(x, y, 'ro', markersize=8, picker=5)
+        self.vertex_markers.append((marker_a, marker_b))
+        return marker_a, marker_b
         
     def update_traces(self):
-        """Update the trace plot with current polygon"""
+        """Update the trace plots with current polygon"""
         if len(self.vertices) < 3 or not self.is_finished:
             return
             
         # Clear previous traces
-        self.trace_ax.clear()
+        self.trace_ax_a.clear()
+        self.trace_ax_b.clear()
         self.sum_ax.clear()
         
-        # Extract and plot traces
-        traces = extract_traces_in_polygon(self.stack, self.vertices)
-        if len(traces) > 0:
+        # Extract and plot traces for ChanA
+        traces_a = extract_traces_in_polygon(self.stack_a, self.vertices)
+        if len(traces_a) > 0:
             # Normalize traces
-            traces = (traces - traces.mean(axis=1, keepdims=True)) / traces.std(axis=1, keepdims=True)
+            traces_a = (traces_a - traces_a.mean(axis=1, keepdims=True)) / traces_a.std(axis=1, keepdims=True)
             
-            # Plot trace matrix
-            self.trace_ax.imshow(traces, aspect='auto', cmap='viridis')
-            self.trace_ax.set_title(f'Traces within polygon ({len(traces)} pixels)')
-            self.trace_ax.set_xlabel('Frame')
-            self.trace_ax.set_ylabel('Pixel')
+            # Plot trace matrix for ChanA
+            self.trace_ax_a.imshow(traces_a, aspect='auto', cmap='viridis')
+            self.trace_ax_a.set_title(f'ChanA Traces ({len(traces_a)} pixels)')
+            self.trace_ax_a.set_xlabel('Frame')
+            self.trace_ax_a.set_ylabel('Pixel')
             
-            # Plot sum of traces
-            sum_trace = np.sum(traces, axis=0)
-            self.sum_ax.plot(sum_trace, 'r-', linewidth=1)
-            self.sum_ax.set_title('Sum of all traces')
-            self.sum_ax.set_xlabel('Frame')
-            self.sum_ax.set_ylabel('Sum intensity')
-            self.sum_ax.grid(True)
+            # Calculate sum for ChanA
+            sum_trace_a = np.sum(traces_a, axis=0)
+            # Normalize sum trace
+            sum_trace_a = (sum_trace_a - np.min(sum_trace_a)) / (np.max(sum_trace_a) - np.min(sum_trace_a))
         else:
-            self.trace_ax.text(0.5, 0.5, 'No pixels in polygon', 
-                             horizontalalignment='center',
-                             verticalalignment='center',
-                             transform=self.trace_ax.transAxes)
-            self.sum_ax.text(0.5, 0.5, 'No pixels in polygon', 
-                           horizontalalignment='center',
-                           verticalalignment='center',
-                           transform=self.sum_ax.transAxes)
+            self.trace_ax_a.text(0.5, 0.5, 'No pixels in polygon', 
+                               horizontalalignment='center',
+                               verticalalignment='center',
+                               transform=self.trace_ax_a.transAxes)
+            sum_trace_a = None
         
-        self.trace_ax.figure.canvas.draw_idle()
+        # Extract and plot traces for ChanB
+        traces_b = extract_traces_in_polygon(self.stack_b, self.vertices)
+        if len(traces_b) > 0:
+            # Normalize traces
+            traces_b = (traces_b - traces_b.mean(axis=1, keepdims=True)) / traces_b.std(axis=1, keepdims=True)
+            
+            # Plot trace matrix for ChanB
+            self.trace_ax_b.imshow(traces_b, aspect='auto', cmap='viridis')
+            self.trace_ax_b.set_title(f'ChanB Traces ({len(traces_b)} pixels)')
+            self.trace_ax_b.set_xlabel('Frame')
+            self.trace_ax_b.set_ylabel('Pixel')
+            
+            # Calculate sum for ChanB
+            sum_trace_b = np.sum(traces_b, axis=0)
+            # Normalize sum trace
+            sum_trace_b = (sum_trace_b - np.min(sum_trace_b)) / (np.max(sum_trace_b) - np.min(sum_trace_b))
+        else:
+            self.trace_ax_b.text(0.5, 0.5, 'No pixels in polygon', 
+                               horizontalalignment='center',
+                               verticalalignment='center',
+                               transform=self.trace_ax_b.transAxes)
+            sum_trace_b = None
+        
+        # Plot combined sum
+        if sum_trace_a is not None:
+            self.sum_ax.plot(sum_trace_a, 'r-', linewidth=1, label='ChanA')
+        if sum_trace_b is not None:
+            self.sum_ax.plot(sum_trace_b, 'g-', linewidth=1, label='ChanB')
+        
+        self.sum_ax.set_title('Normalized Sum of Traces')
+        self.sum_ax.set_xlabel('Frame')
+        self.sum_ax.set_ylabel('Normalized Intensity')
+        self.sum_ax.grid(True)
+        self.sum_ax.legend()
+        
+        # Set y-axis limits to [-0.25, 1.25] for normalized traces
+        self.sum_ax.set_ylim(-0.25, 1.25)
+        
+        self.trace_ax_a.figure.canvas.draw_idle()
+        self.trace_ax_b.figure.canvas.draw_idle()
         self.sum_ax.figure.canvas.draw_idle()
         
     def update_polygon(self):
         """Update the polygon and its lines based on current vertices"""
         # Clear existing lines
-        for line in self.lines:
-            line.remove()
-        self.lines = []
+        for line_a, line_b in self.lines_a + self.lines_b:
+            line_a.remove()
+            line_b.remove()
+        self.lines_a = []
+        self.lines_b = []
         
         # Clear existing vertex markers
-        for marker in self.vertex_markers:
-            marker.remove()
+        for marker_a, marker_b in self.vertex_markers:
+            marker_a.remove()
+            marker_b.remove()
         self.vertex_markers = []
         
-        # Clear existing polygon patch
-        if self.polygon_patch:
-            self.polygon_patch.remove()
-            self.polygon_patch = None
+        # Clear existing polygon patches
+        if self.polygon_patch_a:
+            self.polygon_patch_a.remove()
+            self.polygon_patch_a = None
+        if self.polygon_patch_b:
+            self.polygon_patch_b.remove()
+            self.polygon_patch_b = None
         
         # Draw new lines and markers
         if len(self.vertices) > 1:
             # Create closed polygon vertices
             closed_vertices = self.vertices + [self.vertices[0]] if self.is_finished else self.vertices
             
-            # Draw polygon patch if finished
+            # Draw polygon patches if finished
             if self.is_finished:
-                self.polygon_patch = Polygon(closed_vertices, fill=False, color='red')
-                self.ax.add_patch(self.polygon_patch)
+                self.polygon_patch_a = Polygon(closed_vertices, fill=False, color='red')
+                self.ax_a.add_patch(self.polygon_patch_a)
+                self.polygon_patch_b = Polygon(closed_vertices, fill=False, color='red')
+                self.ax_b.add_patch(self.polygon_patch_b)
             
             # Add vertex markers and line segments
             for i in range(len(self.vertices)):
-                # Add vertex marker
+                # Add vertex markers
                 self.add_vertex_marker(self.vertices[i][0], self.vertices[i][1])
                 
-                # Add line segment
+                # Add line segments
                 if i < len(self.vertices) - 1:
-                    line, = self.ax.plot([self.vertices[i][0], self.vertices[i+1][0]],
-                                       [self.vertices[i][1], self.vertices[i+1][1]], 'r-')
-                    self.lines.append(line)
+                    line_a, = self.ax_a.plot([self.vertices[i][0], self.vertices[i+1][0]],
+                                           [self.vertices[i][1], self.vertices[i+1][1]], 'r-')
+                    line_b, = self.ax_b.plot([self.vertices[i][0], self.vertices[i+1][0]],
+                                           [self.vertices[i][1], self.vertices[i+1][1]], 'r-')
+                    self.lines_a.append((line_a, line_b))
             
             # Add closing line if finished
             if self.is_finished:
-                line, = self.ax.plot([self.vertices[-1][0], self.vertices[0][0]],
-                                   [self.vertices[-1][1], self.vertices[0][1]], 'r-')
-                self.lines.append(line)
+                line_a, = self.ax_a.plot([self.vertices[-1][0], self.vertices[0][0]],
+                                       [self.vertices[-1][1], self.vertices[0][1]], 'r-')
+                line_b, = self.ax_b.plot([self.vertices[-1][0], self.vertices[0][0]],
+                                       [self.vertices[-1][1], self.vertices[0][1]], 'r-')
+                self.lines_a.append((line_a, line_b))
         
         # Update traces if polygon is finished
         if self.is_finished:
             self.update_traces()
             
-        self.ax.figure.canvas.draw_idle()
+        self.ax_a.figure.canvas.draw_idle()
+        self.ax_b.figure.canvas.draw_idle()
         
     def on_press(self, event):
-        if event.inaxes != self.ax:
+        if event.inaxes != self.ax_a:
             return
             
         # Check if we're clicking on a vertex marker
         if event.button == 1:  # Left click
-            for i, marker in enumerate(self.vertex_markers):
-                if marker.contains(event)[0]:
-                    self.dragged_vertex = marker
+            for i, (marker_a, marker_b) in enumerate(self.vertex_markers):
+                if marker_a.contains(event)[0] or marker_b.contains(event)[0]:
+                    self.dragged_vertex = (marker_a, marker_b)
                     self.drag_index = i
                     return
                     
@@ -407,7 +458,7 @@ class PolygonDrawer:
             self.update_polygon()
         
     def on_motion(self, event):
-        if event.inaxes != self.ax:
+        if event.inaxes != self.ax_a:
             return
             
         if self.dragged_vertex is not None:
@@ -418,12 +469,12 @@ class PolygonDrawer:
             # Show temporary line while drawing
             if self.temp_line:
                 self.temp_line.remove()
-            self.temp_line, = self.ax.plot([self.vertices[-1][0], event.xdata],
-                                         [self.vertices[-1][1], event.ydata], 'r-')
-            self.ax.figure.canvas.draw_idle()
+            self.temp_line, = self.ax_a.plot([self.vertices[-1][0], event.xdata],
+                                           [self.vertices[-1][1], event.ydata], 'r-')
+            self.ax_a.figure.canvas.draw_idle()
             
     def on_release(self, event):
-        if event.inaxes != self.ax:
+        if event.inaxes != self.ax_a:
             return
         self.is_drawing = False
         self.dragged_vertex = None
@@ -432,19 +483,26 @@ class PolygonDrawer:
     def clear_polygon(self, event):
         self.vertices = []
         self.is_finished = False
-        if self.polygon_patch:
-            self.polygon_patch.remove()
-            self.polygon_patch = None
+        if self.polygon_patch_a:
+            self.polygon_patch_a.remove()
+            self.polygon_patch_a = None
+        if self.polygon_patch_b:
+            self.polygon_patch_b.remove()
+            self.polygon_patch_b = None
         if self.temp_line:
             self.temp_line.remove()
             self.temp_line = None
-        for line in self.lines:
-            line.remove()
-        self.lines = []
-        for marker in self.vertex_markers:
-            marker.remove()
+        for line_a, line_b in self.lines_a + self.lines_b:
+            line_a.remove()
+            line_b.remove()
+        self.lines_a = []
+        self.lines_b = []
+        for marker_a, marker_b in self.vertex_markers:
+            marker_a.remove()
+            marker_b.remove()
         self.vertex_markers = []
-        self.ax.figure.canvas.draw_idle()
+        self.ax_a.figure.canvas.draw_idle()
+        self.ax_b.figure.canvas.draw_idle()
         
     def finish_polygon(self, event):
         if len(self.vertices) < 3:
@@ -452,81 +510,124 @@ class PolygonDrawer:
         self.is_finished = True
         self.update_polygon()
 
-def create_interactive_window(stretched_average, y_coords, x_coords, stack):
+def create_dual_channel_interactive_window(stretched_average_a, stretched_average_b, y_coords_a, x_coords_a, y_coords_b, x_coords_b, stack_a, stack_b):
     """
-    Create an interactive window for polygon drawing on the average heatmap.
+    Create an interactive window for polygon drawing on both channels.
     
     Parameters:
     -----------
-    stretched_average : numpy.ndarray
-        The stretched average heatmap
-    y_coords : numpy.ndarray
-        Y coordinates of top pixels
-    x_coords : numpy.ndarray
-        X coordinates of top pixels
-    stack : numpy.ndarray
-        The image stack for extracting traces
+    stretched_average_a : numpy.ndarray
+        The stretched average heatmap for ChanA
+    stretched_average_b : numpy.ndarray
+        The stretched average heatmap for ChanB
+    y_coords_a : numpy.ndarray
+        Y coordinates of top pixels for ChanA
+    x_coords_a : numpy.ndarray
+        X coordinates of top pixels for ChanA
+    y_coords_b : numpy.ndarray
+        Y coordinates of top pixels for ChanB
+    x_coords_b : numpy.ndarray
+        X coordinates of top pixels for ChanB
+    stack_a : numpy.ndarray
+        The image stack for ChanA
+    stack_b : numpy.ndarray
+        The image stack for ChanB
     """
-    fig = plt.figure(figsize=(15, 10))
+    fig = plt.figure(figsize=(20, 15))
     
-    # Create subplots
-    gs = plt.GridSpec(2, 2, figure=fig)
-    ax1 = fig.add_subplot(gs[:, 0])  # Left side: polygon
-    ax2 = fig.add_subplot(gs[0, 1])  # Top right: traces
-    ax3 = fig.add_subplot(gs[1, 1])  # Bottom right: sum of traces
+    # Create subplots with further adjusted height ratios
+    gs = plt.GridSpec(3, 2, figure=fig, height_ratios=[0.25, 1, 0.25])
     
-    # Plot heatmap and dots
-    ax1.imshow(stretched_average, cmap='viridis')
-    ax1.scatter(x_coords, y_coords, c='red', s=1, alpha=0.5)
-    ax1.set_title('Draw polygon by clicking. Press "Finish" to close polygon.')
+    # ChanA subplots
+    ax_a_image = fig.add_subplot(gs[1, 0])  # ChanA image (larger)
+    ax_a_traces = fig.add_subplot(gs[0, 0])  # ChanA traces (smaller)
+    
+    # ChanB subplots
+    ax_b_image = fig.add_subplot(gs[1, 1])  # ChanB image (larger)
+    ax_b_traces = fig.add_subplot(gs[0, 1])  # ChanB traces (smaller)
+    
+    # Combined sum subplot
+    ax_sum = fig.add_subplot(gs[2, :])  # Sum of traces (smaller)
+    
+    # Plot heatmaps and dots
+    ax_a_image.imshow(stretched_average_a, cmap='viridis')
+    ax_a_image.scatter(x_coords_a, y_coords_a, c='red', s=1, alpha=0.5)
+    ax_a_image.set_title('ChanA - Draw polygon by clicking. Press "Finish" to close polygon.')
+    
+    ax_b_image.imshow(stretched_average_b, cmap='viridis')
+    ax_b_image.scatter(x_coords_b, y_coords_b, c='red', s=1, alpha=0.5)
+    ax_b_image.set_title('ChanB')
     
     # Initialize polygon drawer
-    drawer = PolygonDrawer(ax1, stretched_average, stack, ax2, ax3)
+    drawer = DualChannelPolygonDrawer(ax_a_image, ax_b_image, stretched_average_a, stretched_average_b, 
+                                     stack_a, stack_b, ax_a_traces, ax_b_traces, ax_sum)
     plt.show()
 
 def main():
     # Set up argument parser
-    parser = argparse.ArgumentParser(description='Process tif stack and create heatmaps')
-    parser.add_argument('tif_path', type=str, help='Path to the tif stack file')
-    parser.add_argument('--z1_start', type=int, required=True, help='Start of first z-range')
-    parser.add_argument('--z1_end', type=int, required=True, help='End of first z-range')
-    parser.add_argument('--z2_start', type=int, required=True, help='Start of second z-range')
-    parser.add_argument('--z2_end', type=int, required=True, help='End of second z-range')
+    parser = argparse.ArgumentParser(description='Process tif stacks and create heatmaps')
+    parser.add_argument('directory', type=str, help='Directory containing ChanA_stk.tif and ChanB_stk.tif')
+    
+    # ChanA z-ranges
+    parser.add_argument('--z1_start_a', type=int, required=True, help='Start of first z-range for ChanA')
+    parser.add_argument('--z1_end_a', type=int, required=True, help='End of first z-range for ChanA')
+    parser.add_argument('--z2_start_a', type=int, required=True, help='Start of second z-range for ChanA')
+    parser.add_argument('--z2_end_a', type=int, required=True, help='End of second z-range for ChanA')
+    
+    # ChanB z-ranges
+    parser.add_argument('--z1_start_b', type=int, required=True, help='Start of first z-range for ChanB')
+    parser.add_argument('--z1_end_b', type=int, required=True, help='End of first z-range for ChanB')
+    parser.add_argument('--z2_start_b', type=int, required=True, help='Start of second z-range for ChanB')
+    parser.add_argument('--z2_end_b', type=int, required=True, help='End of second z-range for ChanB')
     
     args = parser.parse_args()
     
-    # Load tif stack
-    stack = load_tif_stack(args.tif_path)
+    # Construct file paths
+    chan_a_path = os.path.join(args.directory, 'ChanA_stk.tif')
+    chan_b_path = os.path.join(args.directory, 'ChanB_stk.tif')
     
-    # Validate z-ranges
-    if not (0 <= args.z1_start < args.z1_end <= stack.shape[0] and 
-            0 <= args.z2_start < args.z2_end <= stack.shape[0]):
-        raise ValueError("Invalid z-ranges. Must be within stack dimensions.")
+    # Load tif stacks
+    stack_a = load_tif_stack(chan_a_path)
+    stack_b = load_tif_stack(chan_b_path)
     
-    # Create heatmaps
-    average_heatmap, ratio_heatmap = create_heatmaps(
-        stack, 
-        (args.z1_start, args.z1_end), 
-        (args.z2_start, args.z2_end)
+    # Validate z-ranges for ChanA
+    if not (0 <= args.z1_start_a < args.z1_end_a <= stack_a.shape[0] and 
+            0 <= args.z2_start_a < args.z2_end_a <= stack_a.shape[0]):
+        raise ValueError("Invalid z-ranges for ChanA. Must be within stack dimensions.")
+    
+    # Validate z-ranges for ChanB
+    if not (0 <= args.z1_start_b < args.z1_end_b <= stack_b.shape[0] and 
+            0 <= args.z2_start_b < args.z2_end_b <= stack_b.shape[0]):
+        raise ValueError("Invalid z-ranges for ChanB. Must be within stack dimensions.")
+    
+    # Process ChanA with its specific z-ranges
+    average_heatmap_a, ratio_heatmap_a = create_heatmaps(
+        stack_a, 
+        (args.z1_start_a, args.z1_end_a), 
+        (args.z2_start_a, args.z2_end_a)
     )
+    stretched_average_a, stretched_ratio_a = stretch_heatmaps(average_heatmap_a, ratio_heatmap_a)
+    y_coords_a, x_coords_a = get_top_pixels(ratio_heatmap_a)  # Get top pixels from ratio heatmap
+    normalized_traces_a = extract_and_normalize_traces(stack_a, y_coords_a, x_coords_a)
+    mask_image_a = create_mask_image(ratio_heatmap_a.shape, y_coords_a, x_coords_a)
     
-    # Stretch heatmaps
-    stretched_average, stretched_ratio = stretch_heatmaps(average_heatmap, ratio_heatmap)
+    # Process ChanB with its specific z-ranges
+    average_heatmap_b, ratio_heatmap_b = create_heatmaps(
+        stack_b, 
+        (args.z1_start_b, args.z1_end_b), 
+        (args.z2_start_b, args.z2_end_b)
+    )
+    stretched_average_b, stretched_ratio_b = stretch_heatmaps(average_heatmap_b, ratio_heatmap_b)
+    y_coords_b, x_coords_b = get_top_pixels(ratio_heatmap_b)  # Get top pixels from ratio heatmap
+    normalized_traces_b = extract_and_normalize_traces(stack_b, y_coords_b, x_coords_b)
+    mask_image_b = create_mask_image(ratio_heatmap_b.shape, y_coords_b, x_coords_b)
     
-    # Get top 1000 pixels
-    y_coords, x_coords = get_top_pixels(ratio_heatmap)
+    # Plot results for each channel
+    plot_results(stretched_average_a, stretched_ratio_a, normalized_traces_a, mask_image_a, y_coords_a, x_coords_a, 'ChanA')
+    plot_results(stretched_average_b, stretched_ratio_b, normalized_traces_b, mask_image_b, y_coords_b, x_coords_b, 'ChanB')
     
-    # Extract and normalize traces
-    normalized_traces = extract_and_normalize_traces(stack, y_coords, x_coords)
-    
-    # Create mask image
-    mask_image = create_mask_image(ratio_heatmap.shape, y_coords, x_coords)
-    
-    # Plot results
-    plot_results(stretched_average, stretched_ratio, normalized_traces, mask_image, y_coords, x_coords)
-    
-    # Create interactive window for polygon drawing
-    create_interactive_window(stretched_average, y_coords, x_coords, stack)
+    # Create interactive window for dual channel polygon drawing
+    create_dual_channel_interactive_window(stretched_average_a, stretched_average_b, y_coords_a, x_coords_a, y_coords_b, x_coords_b, stack_a, stack_b)
 
 if __name__ == "__main__":
     main() 
