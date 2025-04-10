@@ -255,7 +255,23 @@ def extract_traces_in_polygon(stack, vertices):
     return np.array(traces)
 
 class DualChannelPolygonDrawer:
-    def __init__(self, ax_a, ax_b, image_a, image_b, stack_a, stack_b, trace_ax_a, trace_ax_b, sum_ax):
+    def __init__(self, ax_a, ax_b, image_a, image_b, stack_a, stack_b, trace_ax_a, trace_ax_b, sum_ax,
+                 z1_start_a, z1_end_a, z2_start_a, z2_end_a,
+                 z1_start_b, z1_end_b, z2_start_b, z2_end_b,
+                 z_stim_start, z_stim_end):
+        # Store z-range boundaries first
+        self.z1_start_a = z1_start_a
+        self.z1_end_a = z1_end_a
+        self.z2_start_a = z2_start_a
+        self.z2_end_a = z2_end_a
+        self.z1_start_b = z1_start_b
+        self.z1_end_b = z1_end_b
+        self.z2_start_b = z2_start_b
+        self.z2_end_b = z2_end_b
+        self.z_stim_start = z_stim_start
+        self.z_stim_end = z_stim_end
+        
+        # Store other parameters
         self.ax_a = ax_a
         self.ax_b = ax_b
         self.image_a = image_a
@@ -294,14 +310,27 @@ class DualChannelPolygonDrawer:
         self.finish_button.on_clicked(self.finish_polygon)
         
         self.is_drawing = False
-        
+
     def add_vertex_marker(self, x, y):
         """Add a draggable vertex marker"""
         marker_a, = self.ax_a.plot(x, y, 'ro', markersize=8, picker=5)
         marker_b, = self.ax_b.plot(x, y, 'ro', markersize=8, picker=5)
         self.vertex_markers.append((marker_a, marker_b))
         return marker_a, marker_b
+
+    def normalize_trace_excluding_stim(self, trace):
+        """Normalize trace excluding the stimulation range"""
+        # Create a mask for non-stimulation frames
+        non_stim_mask = np.ones_like(trace, dtype=bool)
+        non_stim_mask[self.z_stim_start:self.z_stim_end] = False
         
+        # Get min and max from non-stimulation frames
+        min_val = np.min(trace[non_stim_mask])
+        max_val = np.max(trace[non_stim_mask])
+        
+        # Normalize using these values
+        return (trace - min_val) / (max_val - min_val)
+
     def update_traces(self):
         """Update the trace plots with current polygon"""
         if len(self.vertices) < 3 or not self.is_finished:
@@ -326,14 +355,22 @@ class DualChannelPolygonDrawer:
             
             # Calculate sum for ChanA
             sum_trace_a = np.sum(traces_a, axis=0)
-            # Normalize sum trace
-            sum_trace_a = (sum_trace_a - np.min(sum_trace_a)) / (np.max(sum_trace_a) - np.min(sum_trace_a))
+            # Normalize sum trace excluding stimulation range
+            sum_trace_a = self.normalize_trace_excluding_stim(sum_trace_a)
+            
+            # Calculate ratio for ChanA within ROI
+            z1_range_a = slice(self.z1_start_a, self.z1_end_a)
+            z2_range_a = slice(self.z2_start_a, self.z2_end_a)
+            baseline_a = np.mean(traces_a[:, z1_range_a], axis=1)
+            response_a = np.mean(traces_a[:, z2_range_a], axis=1)
+            ratio_a = np.mean(response_a / baseline_a)
         else:
             self.trace_ax_a.text(0.5, 0.5, 'No pixels in polygon', 
                                horizontalalignment='center',
                                verticalalignment='center',
                                transform=self.trace_ax_a.transAxes)
             sum_trace_a = None
+            ratio_a = None
         
         # Extract and plot traces for ChanB
         traces_b = extract_traces_in_polygon(self.stack_b, self.vertices)
@@ -349,20 +386,30 @@ class DualChannelPolygonDrawer:
             
             # Calculate sum for ChanB
             sum_trace_b = np.sum(traces_b, axis=0)
-            # Normalize sum trace
-            sum_trace_b = (sum_trace_b - np.min(sum_trace_b)) / (np.max(sum_trace_b) - np.min(sum_trace_b))
+            # Normalize sum trace excluding stimulation range
+            sum_trace_b = self.normalize_trace_excluding_stim(sum_trace_b)
+            
+            # Calculate ratio for ChanB within ROI
+            z1_range_b = slice(self.z1_start_b, self.z1_end_b)
+            z2_range_b = slice(self.z2_start_b, self.z2_end_b)
+            baseline_b = np.mean(traces_b[:, z1_range_b], axis=1)
+            response_b = np.mean(traces_b[:, z2_range_b], axis=1)
+            ratio_b = np.mean(response_b / baseline_b)
         else:
             self.trace_ax_b.text(0.5, 0.5, 'No pixels in polygon', 
                                horizontalalignment='center',
                                verticalalignment='center',
                                transform=self.trace_ax_b.transAxes)
             sum_trace_b = None
+            ratio_b = None
         
-        # Plot combined sum
+        # Plot combined sum with ratio values in legend
         if sum_trace_a is not None:
-            self.sum_ax.plot(sum_trace_a, 'r-', linewidth=1, label='ChanA')
+            label_a = f'ChanA (ratio: {ratio_a:.2f})' if ratio_a is not None else 'ChanA'
+            self.sum_ax.plot(sum_trace_a, 'r-', linewidth=1, label=label_a)
         if sum_trace_b is not None:
-            self.sum_ax.plot(sum_trace_b, 'g-', linewidth=1, label='ChanB')
+            label_b = f'ChanB (ratio: {ratio_b:.2f})' if ratio_b is not None else 'ChanB'
+            self.sum_ax.plot(sum_trace_b, 'g-', linewidth=1, label=label_b)
         
         self.sum_ax.set_title('Normalized Sum of Traces')
         self.sum_ax.set_xlabel('Frame')
@@ -510,7 +557,10 @@ class DualChannelPolygonDrawer:
         self.is_finished = True
         self.update_polygon()
 
-def create_dual_channel_interactive_window(stretched_average_a, stretched_average_b, y_coords_a, x_coords_a, y_coords_b, x_coords_b, stack_a, stack_b):
+def create_dual_channel_interactive_window(stretched_average_a, stretched_average_b, y_coords_a, x_coords_a, y_coords_b, x_coords_b, stack_a, stack_b,
+                                         z1_start_a, z1_end_a, z2_start_a, z2_end_a,
+                                         z1_start_b, z1_end_b, z2_start_b, z2_end_b,
+                                         z_stim_start, z_stim_end):
     """
     Create an interactive window for polygon drawing on both channels.
     
@@ -532,6 +582,16 @@ def create_dual_channel_interactive_window(stretched_average_a, stretched_averag
         The image stack for ChanA
     stack_b : numpy.ndarray
         The image stack for ChanB
+    z1_start_a, z1_end_a : int
+        Start and end of first z-range for ChanA
+    z2_start_a, z2_end_a : int
+        Start and end of second z-range for ChanA
+    z1_start_b, z1_end_b : int
+        Start and end of first z-range for ChanB
+    z2_start_b, z2_end_b : int
+        Start and end of second z-range for ChanB
+    z_stim_start, z_stim_end : int
+        Start and end of stimulation range
     """
     fig = plt.figure(figsize=(20, 15))
     
@@ -558,9 +618,12 @@ def create_dual_channel_interactive_window(stretched_average_a, stretched_averag
     ax_b_image.scatter(x_coords_b, y_coords_b, c='red', s=1, alpha=0.5)
     ax_b_image.set_title('ChanB')
     
-    # Initialize polygon drawer
+    # Initialize polygon drawer with z-range boundaries
     drawer = DualChannelPolygonDrawer(ax_a_image, ax_b_image, stretched_average_a, stretched_average_b, 
-                                     stack_a, stack_b, ax_a_traces, ax_b_traces, ax_sum)
+                                     stack_a, stack_b, ax_a_traces, ax_b_traces, ax_sum,
+                                     z1_start_a, z1_end_a, z2_start_a, z2_end_a,
+                                     z1_start_b, z1_end_b, z2_start_b, z2_end_b,
+                                     z_stim_start, z_stim_end)
     plt.show()
 
 def main():
@@ -579,6 +642,10 @@ def main():
     parser.add_argument('--z1_end_b', type=int, required=True, help='End of first z-range for ChanB')
     parser.add_argument('--z2_start_b', type=int, required=True, help='Start of second z-range for ChanB')
     parser.add_argument('--z2_end_b', type=int, required=True, help='End of second z-range for ChanB')
+    
+    # Stimulation range
+    parser.add_argument('--z_stim_start', type=int, required=True, help='Start of stimulation range')
+    parser.add_argument('--z_stim_end', type=int, required=True, help='End of stimulation range')
     
     args = parser.parse_args()
     
@@ -599,6 +666,10 @@ def main():
     if not (0 <= args.z1_start_b < args.z1_end_b <= stack_b.shape[0] and 
             0 <= args.z2_start_b < args.z2_end_b <= stack_b.shape[0]):
         raise ValueError("Invalid z-ranges for ChanB. Must be within stack dimensions.")
+    
+    # Validate stimulation range
+    if not (0 <= args.z_stim_start < args.z_stim_end <= stack_a.shape[0]):
+        raise ValueError("Invalid stimulation range. Must be within stack dimensions.")
     
     # Process ChanA with its specific z-ranges
     average_heatmap_a, ratio_heatmap_a = create_heatmaps(
@@ -627,7 +698,10 @@ def main():
     plot_results(stretched_average_b, stretched_ratio_b, normalized_traces_b, mask_image_b, y_coords_b, x_coords_b, 'ChanB')
     
     # Create interactive window for dual channel polygon drawing
-    create_dual_channel_interactive_window(stretched_average_a, stretched_average_b, y_coords_a, x_coords_a, y_coords_b, x_coords_b, stack_a, stack_b)
+    create_dual_channel_interactive_window(stretched_average_a, stretched_average_b, y_coords_a, x_coords_a, y_coords_b, x_coords_b, stack_a, stack_b,
+                                         args.z1_start_a, args.z1_end_a, args.z2_start_a, args.z2_end_a,
+                                         args.z1_start_b, args.z1_end_b, args.z2_start_b, args.z2_end_b,
+                                         args.z_stim_start, args.z_stim_end)
 
 if __name__ == "__main__":
     main() 
