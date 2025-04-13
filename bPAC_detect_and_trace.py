@@ -258,7 +258,7 @@ class DualChannelPolygonDrawer:
     def __init__(self, ax_a, ax_b, image_a, image_b, stack_a, stack_b, trace_ax_a, trace_ax_b, sum_ax,
                  z1_start_a, z1_end_a, z2_start_a, z2_end_a,
                  z1_start_b, z1_end_b, z2_start_b, z2_end_b,
-                 z_stim_start, z_stim_end):
+                 z_stim_start, z_stim_end, directory):
         # Store z-range boundaries first
         self.z1_start_a = z1_start_a
         self.z1_end_a = z1_end_a
@@ -270,6 +270,11 @@ class DualChannelPolygonDrawer:
         self.z2_end_b = z2_end_b
         self.z_stim_start = z_stim_start
         self.z_stim_end = z_stim_end
+        
+        # Store directory for ROI saving/loading
+        self.directory = directory
+        self.roi_dir = os.path.join(directory, 'ROIs')
+        os.makedirs(self.roi_dir, exist_ok=True)
         
         # Store other parameters
         self.ax_a = ax_a
@@ -299,15 +304,22 @@ class DualChannelPolygonDrawer:
         self.cidrelease = ax_a.figure.canvas.mpl_connect('button_release_event', self.on_release)
         self.cidmotion = ax_a.figure.canvas.mpl_connect('motion_notify_event', self.on_motion)
         
-        # Add clear button
+        # Add buttons
         self.clear_button_ax = plt.axes([0.81, 0.05, 0.1, 0.04])
         self.clear_button = Button(self.clear_button_ax, 'Clear')
         self.clear_button.on_clicked(self.clear_polygon)
         
-        # Add finish button
         self.finish_button_ax = plt.axes([0.7, 0.05, 0.1, 0.04])
         self.finish_button = Button(self.finish_button_ax, 'Finish')
         self.finish_button.on_clicked(self.finish_polygon)
+        
+        self.save_button_ax = plt.axes([0.59, 0.05, 0.1, 0.04])
+        self.save_button = Button(self.save_button_ax, 'Save')
+        self.save_button.on_clicked(self.save_roi)
+        
+        self.load_button_ax = plt.axes([0.48, 0.05, 0.1, 0.04])
+        self.load_button = Button(self.load_button_ax, 'Load')
+        self.load_button.on_clicked(self.load_roi)
         
         self.is_drawing = False
 
@@ -557,10 +569,76 @@ class DualChannelPolygonDrawer:
         self.is_finished = True
         self.update_polygon()
 
+    def save_roi(self, event):
+        """Save the current ROI vertices to a file"""
+        if not self.is_finished or len(self.vertices) < 3:
+            print("Cannot save: No finished polygon")
+            return
+            
+        # Find the next available ROI number
+        roi_num = 1
+        while os.path.exists(os.path.join(self.roi_dir, f'ROI#{roi_num}.npy')):
+            roi_num += 1
+            
+        # Save vertices
+        roi_path = os.path.join(self.roi_dir, f'ROI#{roi_num}.npy')
+        np.save(roi_path, np.array(self.vertices))
+        print(f"Saved ROI to {roi_path}")
+
+    def create_roi_loader(self, roi_path):
+        """Create a callback function for loading a specific ROI"""
+        def load_callback(event):
+            self.load_roi_file(roi_path)
+        return load_callback
+
+    def load_roi(self, event):
+        """Load a saved ROI from file"""
+        # Get list of saved ROIs
+        roi_files = [f for f in os.listdir(self.roi_dir) if f.startswith('ROI#') and f.endswith('.npy')]
+        if not roi_files:
+            print("No saved ROIs found")
+            return
+            
+        # Create a simple dialog to select ROI
+        self.roi_dialog_fig = plt.figure(figsize=(6, 4))
+        ax = self.roi_dialog_fig.add_subplot(111)
+        ax.set_title('Select ROI to load')
+        ax.axis('off')
+        
+        # Create buttons for each ROI
+        self.roi_buttons = []
+        for i, roi_file in enumerate(roi_files):
+            btn_ax = plt.axes([0.1, 0.8 - i*0.1, 0.8, 0.08])
+            btn = Button(btn_ax, roi_file)
+            btn.on_clicked(self.create_roi_loader(os.path.join(self.roi_dir, roi_file)))
+            self.roi_buttons.append(btn)
+            
+        # Make sure the figure stays interactive
+        plt.ion()
+        self.roi_dialog_fig.canvas.draw()
+        self.roi_dialog_fig.canvas.flush_events()
+
+    def load_roi_file(self, roi_path):
+        """Load vertices from a specific ROI file"""
+        try:
+            vertices = np.load(roi_path)
+            self.clear_polygon(None)  # Clear current polygon
+            self.vertices = vertices.tolist()
+            self.is_finished = True
+            self.update_polygon()
+            self.update_traces()
+            # Close the ROI selection dialog if it exists
+            if hasattr(self, 'roi_dialog_fig'):
+                plt.close(self.roi_dialog_fig)
+                delattr(self, 'roi_dialog_fig')
+                delattr(self, 'roi_buttons')
+        except Exception as e:
+            print(f"Error loading ROI: {e}")
+
 def create_dual_channel_interactive_window(stretched_average_a, stretched_average_b, y_coords_a, x_coords_a, y_coords_b, x_coords_b, stack_a, stack_b,
                                          z1_start_a, z1_end_a, z2_start_a, z2_end_a,
                                          z1_start_b, z1_end_b, z2_start_b, z2_end_b,
-                                         z_stim_start, z_stim_end):
+                                         z_stim_start, z_stim_end, directory):
     """
     Create an interactive window for polygon drawing on both channels.
     
@@ -592,6 +670,8 @@ def create_dual_channel_interactive_window(stretched_average_a, stretched_averag
         Start and end of second z-range for ChanB
     z_stim_start, z_stim_end : int
         Start and end of stimulation range
+    directory : str
+        Directory path for saving/loading ROIs
     """
     fig = plt.figure(figsize=(20, 15))
     
@@ -623,7 +703,7 @@ def create_dual_channel_interactive_window(stretched_average_a, stretched_averag
                                      stack_a, stack_b, ax_a_traces, ax_b_traces, ax_sum,
                                      z1_start_a, z1_end_a, z2_start_a, z2_end_a,
                                      z1_start_b, z1_end_b, z2_start_b, z2_end_b,
-                                     z_stim_start, z_stim_end)
+                                     z_stim_start, z_stim_end, directory)
     plt.show()
 
 def main():
@@ -631,23 +711,41 @@ def main():
     parser = argparse.ArgumentParser(description='Process tif stacks and create heatmaps')
     parser.add_argument('directory', type=str, help='Directory containing ChanA_stk.tif and ChanB_stk.tif')
     
-    # ChanA z-ranges
-    parser.add_argument('--z1_start_a', type=int, required=True, help='Start of first z-range for ChanA')
-    parser.add_argument('--z1_end_a', type=int, required=True, help='End of first z-range for ChanA')
-    parser.add_argument('--z2_start_a', type=int, required=True, help='Start of second z-range for ChanA')
-    parser.add_argument('--z2_end_a', type=int, required=True, help='End of second z-range for ChanA')
+    # ChanA z-ranges with defaults
+    parser.add_argument('--z1_start_a', type=int, default=40, help='Start of first z-range for ChanA (default: 40)')
+    parser.add_argument('--z1_end_a', type=int, default=90, help='End of first z-range for ChanA (default: 90)')
+    parser.add_argument('--z2_start_a', type=int, default=10, help='Start of second z-range for ChanA (default: 10)')
+    parser.add_argument('--z2_end_a', type=int, default=30, help='End of second z-range for ChanA (default: 30)')
     
-    # ChanB z-ranges
-    parser.add_argument('--z1_start_b', type=int, required=True, help='Start of first z-range for ChanB')
-    parser.add_argument('--z1_end_b', type=int, required=True, help='End of first z-range for ChanB')
-    parser.add_argument('--z2_start_b', type=int, required=True, help='Start of second z-range for ChanB')
-    parser.add_argument('--z2_end_b', type=int, required=True, help='End of second z-range for ChanB')
+    # ChanB z-ranges with defaults
+    parser.add_argument('--z1_start_b', type=int, default=40, help='Start of first z-range for ChanB (default: 40)')
+    parser.add_argument('--z1_end_b', type=int, default=90, help='End of first z-range for ChanB (default: 90)')
+    parser.add_argument('--z2_start_b', type=int, default=10, help='Start of second z-range for ChanB (default: 10)')
+    parser.add_argument('--z2_end_b', type=int, default=30, help='End of second z-range for ChanB (default: 30)')
     
-    # Stimulation range
-    parser.add_argument('--z_stim_start', type=int, required=True, help='Start of stimulation range')
-    parser.add_argument('--z_stim_end', type=int, required=True, help='End of stimulation range')
+    # Stimulation range with defaults
+    parser.add_argument('--z_stim_start', type=int, default=35, help='Start of stimulation range (default: 35)')
+    parser.add_argument('--z_stim_end', type=int, default=40, help='End of stimulation range (default: 40)')
     
     args = parser.parse_args()
+    
+    # Print settings information
+    print("\n=== Settings Information ===")
+    print("Using default settings:", all([
+        args.z1_start_a == 40, args.z1_end_a == 90,
+        args.z2_start_a == 10, args.z2_end_a == 30,
+        args.z1_start_b == 40, args.z1_end_b == 90,
+        args.z2_start_b == 10, args.z2_end_b == 30,
+        args.z_stim_start == 35, args.z_stim_end == 40
+    ]))
+    print("\nChannel A Settings:")
+    print(f"z1 range: {args.z1_start_a}-{args.z1_end_a}")
+    print(f"z2 range: {args.z2_start_a}-{args.z2_end_a}")
+    print("\nChannel B Settings:")
+    print(f"z1 range: {args.z1_start_b}-{args.z1_end_b}")
+    print(f"z2 range: {args.z2_start_b}-{args.z2_end_b}")
+    print(f"\nStimulation range: {args.z_stim_start}-{args.z_stim_end}")
+    print("==========================\n")
     
     # Construct file paths
     chan_a_path = os.path.join(args.directory, 'ChanA_stk.tif')
@@ -701,7 +799,7 @@ def main():
     create_dual_channel_interactive_window(stretched_average_a, stretched_average_b, y_coords_a, x_coords_a, y_coords_b, x_coords_b, stack_a, stack_b,
                                          args.z1_start_a, args.z1_end_a, args.z2_start_a, args.z2_end_a,
                                          args.z1_start_b, args.z1_end_b, args.z2_start_b, args.z2_end_b,
-                                         args.z_stim_start, args.z_stim_end)
+                                         args.z_stim_start, args.z_stim_end, args.directory)
 
 if __name__ == "__main__":
     main() 
