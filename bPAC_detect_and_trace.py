@@ -36,9 +36,9 @@ def create_heatmaps(stack, z1_range, z2_range):
     stack : numpy.ndarray
         The image stack
     z1_range : tuple
-        (start, end) of first z-range
+        (start, end) of baseline z-range
     z2_range : tuple
-        (start, end) of second z-range
+        (start, end) of response z-range
         
     Returns:
     --------
@@ -49,13 +49,13 @@ def create_heatmaps(stack, z1_range, z2_range):
     z2_start, z2_end = z2_range
     
     # Calculate average for each z-range
-    avg1 = np.mean(stack[z1_start:z1_end], axis=0)
-    avg2 = np.mean(stack[z2_start:z2_end], axis=0)
+    baseline = np.mean(stack[z1_start:z1_end], axis=0)  # z1 range is baseline
+    response = np.mean(stack[z2_start:z2_end], axis=0)  # z2 range is response
     
-    # Calculate ratio (z1_range divided by z2_range)
-    ratio = avg1 / (avg2 + 1e-10)  # Add small constant to avoid division by zero
+    # Calculate ratio (response divided by baseline)
+    ratio = response / (baseline + 1e-10)  # Add small constant to avoid division by zero
     
-    return avg1, ratio
+    return baseline, ratio
 
 def stretch_heatmaps(average_heatmap, ratio_heatmap):
     """
@@ -83,7 +83,7 @@ def stretch_heatmaps(average_heatmap, ratio_heatmap):
     
     return stretched_average, stretched_ratio
 
-def get_top_pixels(ratio_heatmap, n=1000):
+def get_top_pixels(ratio_heatmap, n=5000):
     """
     Get the coordinates of the top n pixels in the ratio heatmap.
     
@@ -92,7 +92,7 @@ def get_top_pixels(ratio_heatmap, n=1000):
     ratio_heatmap : numpy.ndarray
         The ratio heatmap
     n : int
-        Number of top pixels to select
+        Number of top pixels to select (default: 5000)
         
     Returns:
     --------
@@ -361,6 +361,35 @@ class DualChannelPolygonDrawer:
             
             # Plot trace matrix for ChanA
             self.trace_ax_a.imshow(traces_a, aspect='auto', cmap='viridis')
+            
+            # Add z1 range indicator
+            z1_rect = plt.Rectangle((self.z1_start_a, -0.5), 
+                                  self.z1_end_a - self.z1_start_a, 
+                                  len(traces_a), 
+                                  facecolor='gray', alpha=0.2)
+            self.trace_ax_a.add_patch(z1_rect)
+            self.trace_ax_a.text(self.z1_start_a + (self.z1_end_a - self.z1_start_a)/2,  # Center of rectangle
+                               len(traces_a)/2,  # Middle of rectangle
+                               'ChanA z1', 
+                               horizontalalignment='center',
+                               verticalalignment='center',
+                               color='red',
+                               fontsize=8)
+            
+            # Add z2 range indicator
+            z2_rect = plt.Rectangle((self.z2_start_a, -0.5), 
+                                  self.z2_end_a - self.z2_start_a, 
+                                  len(traces_a), 
+                                  facecolor='gray', alpha=0.2)
+            self.trace_ax_a.add_patch(z2_rect)
+            self.trace_ax_a.text(self.z2_start_a + (self.z2_end_a - self.z2_start_a)/2,  # Center of rectangle
+                               len(traces_a)/2,  # Middle of rectangle
+                               'ChanA z2', 
+                               horizontalalignment='center',
+                               verticalalignment='center',
+                               color='red',
+                               fontsize=8)
+            
             self.trace_ax_a.set_title(f'ChanA Traces ({len(traces_a)} pixels)')
             self.trace_ax_a.set_xlabel('Frame')
             self.trace_ax_a.set_ylabel('Pixel')
@@ -392,6 +421,35 @@ class DualChannelPolygonDrawer:
             
             # Plot trace matrix for ChanB
             self.trace_ax_b.imshow(traces_b, aspect='auto', cmap='viridis')
+            
+            # Add z1 range indicator
+            z1_rect = plt.Rectangle((self.z1_start_b, -0.5), 
+                                  self.z1_end_b - self.z1_start_b, 
+                                  len(traces_b), 
+                                  facecolor='gray', alpha=0.2)
+            self.trace_ax_b.add_patch(z1_rect)
+            self.trace_ax_b.text(self.z1_start_b + (self.z1_end_b - self.z1_start_b)/2,  # Center of rectangle
+                               len(traces_b)/2,  # Middle of rectangle
+                               'ChanB z1', 
+                               horizontalalignment='center',
+                               verticalalignment='center',
+                               color='red',
+                               fontsize=8)
+            
+            # Add z2 range indicator
+            z2_rect = plt.Rectangle((self.z2_start_b, -0.5), 
+                                  self.z2_end_b - self.z2_start_b, 
+                                  len(traces_b), 
+                                  facecolor='gray', alpha=0.2)
+            self.trace_ax_b.add_patch(z2_rect)
+            self.trace_ax_b.text(self.z2_start_b + (self.z2_end_b - self.z2_start_b)/2,  # Center of rectangle
+                               len(traces_b)/2,  # Middle of rectangle
+                               'ChanB z2', 
+                               horizontalalignment='center',
+                               verticalalignment='center',
+                               color='red',
+                               fontsize=8)
+            
             self.trace_ax_b.set_title(f'ChanB Traces ({len(traces_b)} pixels)')
             self.trace_ax_b.set_xlabel('Frame')
             self.trace_ax_b.set_ylabel('Pixel')
@@ -712,16 +770,16 @@ def main():
     parser.add_argument('directory', type=str, help='Directory containing ChanA_stk.tif and ChanB_stk.tif')
     
     # ChanA z-ranges with defaults
-    parser.add_argument('--z1_start_a', type=int, default=40, help='Start of first z-range for ChanA (default: 40)')
-    parser.add_argument('--z1_end_a', type=int, default=90, help='End of first z-range for ChanA (default: 90)')
-    parser.add_argument('--z2_start_a', type=int, default=10, help='Start of second z-range for ChanA (default: 10)')
-    parser.add_argument('--z2_end_a', type=int, default=30, help='End of second z-range for ChanA (default: 30)')
+    parser.add_argument('--z1_start_a', type=int, default=10, help='Start of first z-range for ChanA (default: 10)')
+    parser.add_argument('--z1_end_a', type=int, default=30, help='End of first z-range for ChanA (default: 30)')
+    parser.add_argument('--z2_start_a', type=int, default=40, help='Start of second z-range for ChanA (default: 40)')
+    parser.add_argument('--z2_end_a', type=int, default=70, help='End of second z-range for ChanA (default: 90)')
     
     # ChanB z-ranges with defaults
-    parser.add_argument('--z1_start_b', type=int, default=40, help='Start of first z-range for ChanB (default: 40)')
-    parser.add_argument('--z1_end_b', type=int, default=90, help='End of first z-range for ChanB (default: 90)')
-    parser.add_argument('--z2_start_b', type=int, default=10, help='Start of second z-range for ChanB (default: 10)')
-    parser.add_argument('--z2_end_b', type=int, default=30, help='End of second z-range for ChanB (default: 30)')
+    parser.add_argument('--z1_start_b', type=int, default=10, help='Start of first z-range for ChanB (default: 10)')
+    parser.add_argument('--z1_end_b', type=int, default=30, help='End of first z-range for ChanB (default: 30)')
+    parser.add_argument('--z2_start_b', type=int, default=40, help='Start of second z-range for ChanB (default: 40)')
+    parser.add_argument('--z2_end_b', type=int, default=55, help='End of second z-range for ChanB (default: 55)')
     
     # Stimulation range with defaults
     parser.add_argument('--z_stim_start', type=int, default=35, help='Start of stimulation range (default: 35)')
@@ -732,10 +790,10 @@ def main():
     # Print settings information
     print("\n=== Settings Information ===")
     print("Using default settings:", all([
-        args.z1_start_a == 40, args.z1_end_a == 90,
-        args.z2_start_a == 10, args.z2_end_a == 30,
-        args.z1_start_b == 40, args.z1_end_b == 90,
-        args.z2_start_b == 10, args.z2_end_b == 30,
+        args.z1_start_a == 10, args.z1_end_a == 30,
+        args.z2_start_a == 40, args.z2_end_a == 90,
+        args.z1_start_b == 10, args.z1_end_b == 30,
+        args.z2_start_b == 40, args.z2_end_b == 55,
         args.z_stim_start == 35, args.z_stim_end == 40
     ]))
     print("\nChannel A Settings:")
