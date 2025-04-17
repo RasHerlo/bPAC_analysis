@@ -80,14 +80,40 @@ def calculate_roi_trace(stack, roi_coords):
     trace = np.mean(stack[:, mask], axis=1)
     return trace
 
-def plot_rois_on_image(avg_image, rois, stack):
+def normalize_trace_excluding_stim(trace, z_stim_start, z_stim_end):
+    """
+    Normalize trace to 0-1 range using only values outside the stimulation range.
+    
+    Args:
+        trace (numpy.ndarray): The trace to normalize
+        z_stim_start (int): Start of stimulation range
+        z_stim_end (int): End of stimulation range
+        
+    Returns:
+        numpy.ndarray: Normalized trace
+    """
+    # Create a mask for non-stimulation frames
+    non_stim_mask = np.ones_like(trace, dtype=bool)
+    non_stim_mask[z_stim_start:z_stim_end] = False
+    
+    # Get min and max from non-stimulation frames
+    min_val = np.min(trace[non_stim_mask])
+    max_val = np.max(trace[non_stim_mask])
+    
+    # Normalize using these values
+    return (trace - min_val) / (max_val - min_val)
+
+def plot_rois_on_image(avg_image, rois, stackA, stackB, z_stim_start, z_stim_end):
     """
     Plot the average image with ROIs overlaid and create detailed subplots for each ROI.
     
     Args:
         avg_image (numpy.ndarray): The average image to plot
         rois (dict): Dictionary of ROIs with their coordinates
-        stack (numpy.ndarray): The image stack for calculating traces
+        stackA (numpy.ndarray): The image stack for channel A
+        stackB (numpy.ndarray): The image stack for channel B
+        z_stim_start (int): Start of stimulation range
+        z_stim_end (int): End of stimulation range
     """
     # Calculate figure size based on number of ROIs
     n_rois = len(rois)
@@ -136,14 +162,34 @@ def plot_rois_on_image(avg_image, rois, stack):
         ax_roi.set_title(f'ROI: {roi_name}')
         ax_roi.set_aspect('equal')
         
-        # Calculate and plot trace
+        # Add thin red ROI lines to zoom window
+        roi_coords_closed = np.vstack([roi_coords, roi_coords[0]])
+        roi_coords_relative = roi_coords_closed - np.array([x_min, y_min])
+        ax_roi.plot(roi_coords_relative[:, 0], roi_coords_relative[:, 1], 'r-', linewidth=1)
+        
+        # Calculate and plot traces from both channels
         ax_trace = fig.add_subplot(gs[row, col+1:col+3])
-        trace = calculate_roi_trace(stack, roi_coords)
-        ax_trace.plot(trace, 'k-', label=roi_name)
+        trace_chanA = calculate_roi_trace(stackA, roi_coords)
+        trace_chanB = calculate_roi_trace(stackB, roi_coords)
+        
+        # Normalize traces excluding stimulation range
+        norm_trace_chanA = normalize_trace_excluding_stim(trace_chanA, z_stim_start, z_stim_end)
+        norm_trace_chanB = normalize_trace_excluding_stim(trace_chanB, z_stim_start, z_stim_end)
+        
+        ax_trace.plot(norm_trace_chanA, 'r-', label=f'{roi_name} (ChanA)')
+        ax_trace.plot(norm_trace_chanB, 'g-', label=f'{roi_name} (ChanB)')
         ax_trace.legend()
-        ax_trace.set_title(f'Trace: {roi_name}')
+        ax_trace.set_title(f'Normalized Traces: {roi_name}')
         ax_trace.set_xlabel('Frame')
-        ax_trace.set_ylabel('Average Intensity')
+        ax_trace.set_ylabel('Normalized Intensity')
+        
+        # Add stimulation range indicator
+        stim_rect = plt.Rectangle((z_stim_start, -0.25), 
+                                z_stim_end - z_stim_start, 
+                                1.5, 
+                                facecolor='gray', alpha=0.2)
+        ax_trace.add_patch(stim_rect)
+        ax_trace.set_ylim(-0.25, 1.25)  # Set y-axis limits for normalized traces
     
     plt.tight_layout()
     plt.show()
@@ -183,8 +229,12 @@ def main():
             roi_name = os.path.splitext(roi_file)[0]
             rois[roi_name] = load_roi(roi_path)
     
+    # Define stimulation range (you can make these command line arguments if needed)
+    z_stim_start = 35  # Default stimulation start
+    z_stim_end = 40    # Default stimulation end
+    
     # Plot ROIs on average image with traces
-    plot_rois_on_image(avg_chanB, rois, chanB_stack)  # Using ChanB as it's typically the signal channel
+    plot_rois_on_image(avg_chanB, rois, chanA_stack, chanB_stack, z_stim_start, z_stim_end)
 
 if __name__ == '__main__':
     main() 
