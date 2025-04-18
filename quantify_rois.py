@@ -13,7 +13,7 @@ def load_tif_stack(directory, channel):
     Parameters:
     -----------
     directory : str
-        Directory containing the TIFF stack
+        Directory containing the TIFF stack (STKS folder)
     channel : str
         Channel name ('ChanA' or 'ChanB')
         
@@ -197,11 +197,10 @@ def plot_rois_on_image(avg_image, rois, stackA, stackB, z_stim_start, z_stim_end
 def main():
     # Get directory path from command line argument
     if len(sys.argv) != 2:
-        print("Usage: python quantify_rois.py <directory_path>")
+        print("Usage: python quantify_rois.py <stks_directory_path>")
         sys.exit(1)
     
-    directory = sys.argv[1]
-    stks_dir = os.path.join(directory, 'STKS')
+    stks_dir = sys.argv[1]
     roi_dir = os.path.join(stks_dir, 'ROIs')  # ROIs are inside STKS folder
     
     # Check if directories exist
