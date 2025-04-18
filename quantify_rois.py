@@ -103,6 +103,31 @@ def normalize_trace_excluding_stim(trace, z_stim_start, z_stim_end):
     # Normalize using these values
     return (trace - min_val) / (max_val - min_val)
 
+def zscore_trace(trace, z_stim_start, z_stim_end):
+    """
+    Convert a trace to Z-scores using baseline mean and overall std.
+    
+    Args:
+        trace (numpy.ndarray): The trace to Z-score
+        z_stim_start (int): Start of stimulation range
+        z_stim_end (int): End of stimulation range
+        
+    Returns:
+        numpy.ndarray: Z-scored trace
+    """
+    # Create a mask for non-stimulation frames
+    non_stim_mask = np.ones_like(trace, dtype=bool)
+    non_stim_mask[z_stim_start:z_stim_end] = False
+    
+    # Calculate mean from non-stimulation frames
+    baseline_mean = np.mean(trace[non_stim_mask])
+    
+    # Calculate std from entire trace
+    trace_std = np.std(trace)
+    
+    # Z-score the trace
+    return (trace - baseline_mean) / trace_std
+
 def plot_rois_on_image(avg_image, rois, stackA, stackB, z_stim_start, z_stim_end):
     """
     Plot the average image with ROIs overlaid and create detailed subplots for each ROI.
@@ -194,6 +219,79 @@ def plot_rois_on_image(avg_image, rois, stackA, stackB, z_stim_start, z_stim_end
     plt.tight_layout()
     plt.show()
 
+def plot_summary_traces(rois, stackA, stackB, z_stim_start, z_stim_end):
+    """
+    Create a summary figure showing all normalized and Z-scored traces.
+    
+    Args:
+        rois (dict): Dictionary of ROIs with their coordinates
+        stackA (numpy.ndarray): The image stack for channel A
+        stackB (numpy.ndarray): The image stack for channel B
+        z_stim_start (int): Start of stimulation range
+        z_stim_end (int): End of stimulation range
+    """
+    # Create figure with two subplots
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
+    
+    # Lists to store all traces for averaging
+    all_norm_traces_chanA = []
+    all_norm_traces_chanB = []
+    all_zscore_traces_chanA = []
+    all_zscore_traces_chanB = []
+    
+    # Process each ROI
+    for roi_name, roi_coords in rois.items():
+        # Calculate traces
+        trace_chanA = calculate_roi_trace(stackA, roi_coords)
+        trace_chanB = calculate_roi_trace(stackB, roi_coords)
+        
+        # Normalize traces
+        norm_trace_chanA = normalize_trace_excluding_stim(trace_chanA, z_stim_start, z_stim_end)
+        norm_trace_chanB = normalize_trace_excluding_stim(trace_chanB, z_stim_start, z_stim_end)
+        
+        # Z-score traces
+        zscore_trace_chanA = zscore_trace(trace_chanA, z_stim_start, z_stim_end)
+        zscore_trace_chanB = zscore_trace(trace_chanB, z_stim_start, z_stim_end)
+        
+        # Store traces for averaging
+        all_norm_traces_chanA.append(norm_trace_chanA)
+        all_norm_traces_chanB.append(norm_trace_chanB)
+        all_zscore_traces_chanA.append(zscore_trace_chanA)
+        all_zscore_traces_chanB.append(zscore_trace_chanB)
+        
+        # Plot individual traces
+        ax1.plot(norm_trace_chanA, 'r:', alpha=0.3)
+        ax1.plot(norm_trace_chanB, 'g:', alpha=0.3)
+        ax2.plot(zscore_trace_chanA, 'r:', alpha=0.3)
+        ax2.plot(zscore_trace_chanB, 'g:', alpha=0.3)
+    
+    # Calculate and plot average traces
+    avg_norm_chanA = np.mean(all_norm_traces_chanA, axis=0)
+    avg_norm_chanB = np.mean(all_norm_traces_chanB, axis=0)
+    avg_zscore_chanA = np.mean(all_zscore_traces_chanA, axis=0)
+    avg_zscore_chanB = np.mean(all_zscore_traces_chanB, axis=0)
+    
+    # Plot average traces
+    ax1.plot(avg_norm_chanA, 'r-', linewidth=2, label='Avg ChanA')
+    ax1.plot(avg_norm_chanB, 'g-', linewidth=2, label='Avg ChanB')
+    ax2.plot(avg_zscore_chanA, 'r-', linewidth=2, label='Avg ChanA')
+    ax2.plot(avg_zscore_chanB, 'g-', linewidth=2, label='Avg ChanB')
+    
+    # Set titles and labels
+    ax1.set_title('normalized traces')
+    ax2.set_title('Z-scored traces')
+    ax1.set_xlabel('Frame')
+    ax2.set_xlabel('Frame')
+    ax1.set_ylabel('Normalized Intensity')
+    ax2.set_ylabel('Z-score')
+    
+    # Add legends
+    ax1.legend()
+    ax2.legend()
+    
+    plt.tight_layout()
+    plt.show()
+
 def main():
     # Get directory path from command line argument
     if len(sys.argv) != 2:
@@ -234,6 +332,9 @@ def main():
     
     # Plot ROIs on average image with traces
     plot_rois_on_image(avg_chanB, rois, chanA_stack, chanB_stack, z_stim_start, z_stim_end)
+    
+    # Plot summary traces
+    plot_summary_traces(rois, chanA_stack, chanB_stack, z_stim_start, z_stim_end)
 
 if __name__ == '__main__':
     main() 
