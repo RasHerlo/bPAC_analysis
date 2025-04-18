@@ -5,6 +5,7 @@ from tifffile import imread
 import argparse
 import sys
 from skimage.draw import polygon
+from matplotlib.widgets import Slider
 
 def load_tif_stack(directory, channel):
     """
@@ -128,6 +129,20 @@ def zscore_trace(trace, z_stim_start, z_stim_end):
     # Z-score the trace
     return (trace - baseline_mean) / trace_std
 
+def calculate_compensated_trace(trace_chanA, trace_chanB, compensation_percent):
+    """
+    Calculate compensated trace for channel A based on channel B.
+    
+    Args:
+        trace_chanA (numpy.ndarray): Raw trace from channel A
+        trace_chanB (numpy.ndarray): Raw trace from channel B
+        compensation_percent (float): Compensation percentage (0-30)
+        
+    Returns:
+        numpy.ndarray: Compensated trace for channel A
+    """
+    return trace_chanA - (compensation_percent/100 * trace_chanB)
+
 def plot_rois_on_image(avg_image, rois, stackA, stackB, z_stim_start, z_stim_end):
     """
     Plot the average image with ROIs overlaid and create detailed subplots for each ROI.
@@ -146,8 +161,8 @@ def plot_rois_on_image(avg_image, rois, stackA, stackB, z_stim_start, z_stim_end
     n_cols = 6  # 3 for main image + 3 for ROI details
     
     # Create figure with appropriate size
-    fig = plt.figure(figsize=(n_cols * 3, n_rows * 3))
-    gs = plt.GridSpec(n_rows, n_cols, figure=fig)
+    fig = plt.figure(figsize=(n_cols * 3, n_rows * 3 + 1))  # Extra space for slider
+    gs = plt.GridSpec(n_rows + 1, n_cols, figure=fig)  # Extra row for slider
     
     # Plot main image in upper left (3x3)
     ax_main = fig.add_subplot(gs[0:3, 0:3])
@@ -163,6 +178,10 @@ def plot_rois_on_image(avg_image, rois, stackA, stackB, z_stim_start, z_stim_end
         ax_main.text(center_x, center_y, roi_name, color='red',
                     horizontalalignment='center', verticalalignment='center',
                     bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'))
+    
+    # Store raw traces and plot objects for updating
+    raw_traces = {}
+    plot_objects = {}
     
     # Plot each ROI and its trace
     for i, (roi_name, roi_coords) in enumerate(rois.items()):
@@ -197,12 +216,18 @@ def plot_rois_on_image(avg_image, rois, stackA, stackB, z_stim_start, z_stim_end
         trace_chanA = calculate_roi_trace(stackA, roi_coords)
         trace_chanB = calculate_roi_trace(stackB, roi_coords)
         
+        # Store raw traces
+        raw_traces[roi_name] = {'A': trace_chanA, 'B': trace_chanB}
+        
         # Normalize traces excluding stimulation range
         norm_trace_chanA = normalize_trace_excluding_stim(trace_chanA, z_stim_start, z_stim_end)
         norm_trace_chanB = normalize_trace_excluding_stim(trace_chanB, z_stim_start, z_stim_end)
         
-        ax_trace.plot(norm_trace_chanA, 'r-', label=f'{roi_name} (ChanA)')
-        ax_trace.plot(norm_trace_chanB, 'g-', label=f'{roi_name} (ChanB)')
+        # Plot traces and store plot objects
+        lineA, = ax_trace.plot(norm_trace_chanA, 'r-', label=f'{roi_name} (ChanA)')
+        lineB, = ax_trace.plot(norm_trace_chanB, 'g-', label=f'{roi_name} (ChanB)')
+        plot_objects[roi_name] = {'A': lineA, 'B': lineB}
+        
         ax_trace.legend()
         ax_trace.set_title(f'Normalized Traces: {roi_name}')
         ax_trace.set_xlabel('Frame')
@@ -215,6 +240,44 @@ def plot_rois_on_image(avg_image, rois, stackA, stackB, z_stim_start, z_stim_end
                                 facecolor='gray', alpha=0.2)
         ax_trace.add_patch(stim_rect)
         ax_trace.set_ylim(-0.25, 1.25)  # Set y-axis limits for normalized traces
+    
+    # Add compensation slider
+    ax_slider = fig.add_subplot(gs[n_rows, :])
+    slider = Slider(
+        ax=ax_slider,
+        label='Channel A Compensation (%)',
+        valmin=0,
+        valmax=30,
+        valinit=0,
+        valstep=1
+    )
+    
+    # Add tick marks and labels
+    slider.ax.set_xticks(range(0, 31, 1))  # Tick marks every 1%
+    slider.ax.set_xticklabels([str(x) if x % 5 == 0 else '' for x in range(0, 31, 1)])  # Labels every 5%
+    
+    # Add text label for current value
+    text_label = ax_slider.text(0.5, 0.5, 'Compensation: 0%', 
+                              transform=ax_slider.transAxes,
+                              ha='center', va='center')
+    
+    def update(val):
+        compensation = slider.val
+        text_label.set_text(f'Compensation: {compensation:.0f}%')
+        
+        for roi_name, traces in raw_traces.items():
+            # Calculate compensated trace
+            compensated_trace = calculate_compensated_trace(traces['A'], traces['B'], compensation)
+            
+            # Normalize compensated trace
+            norm_compensated = normalize_trace_excluding_stim(compensated_trace, z_stim_start, z_stim_end)
+            
+            # Update plot
+            plot_objects[roi_name]['A'].set_ydata(norm_compensated)
+        
+        fig.canvas.draw_idle()
+    
+    slider.on_changed(update)
     
     plt.tight_layout()
     plt.show()
@@ -230,8 +293,18 @@ def plot_summary_traces(rois, stackA, stackB, z_stim_start, z_stim_end):
         z_stim_start (int): Start of stimulation range
         z_stim_end (int): End of stimulation range
     """
-    # Create figure with two subplots
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
+    # Create figure with two subplots and extra space for slider
+    fig = plt.figure(figsize=(15, 6))
+    
+    # Create a 2x1 grid for the plots and slider
+    gs = plt.GridSpec(2, 1, height_ratios=[5, 1], figure=fig)
+    
+    # Create a 1x2 grid for the two plots within the top space
+    gs_top = gs[0].subgridspec(1, 2)
+    
+    # Create subplots
+    ax1 = fig.add_subplot(gs_top[0])  # First subplot
+    ax2 = fig.add_subplot(gs_top[1])  # Second subplot
     
     # Lists to store all traces for averaging
     all_norm_traces_chanA = []
@@ -239,11 +312,18 @@ def plot_summary_traces(rois, stackA, stackB, z_stim_start, z_stim_end):
     all_zscore_traces_chanA = []
     all_zscore_traces_chanB = []
     
+    # Store raw traces and plot objects
+    raw_traces = {}
+    plot_objects = {}
+    
     # Process each ROI
     for roi_name, roi_coords in rois.items():
         # Calculate traces
         trace_chanA = calculate_roi_trace(stackA, roi_coords)
         trace_chanB = calculate_roi_trace(stackB, roi_coords)
+        
+        # Store raw traces
+        raw_traces[roi_name] = {'A': trace_chanA, 'B': trace_chanB}
         
         # Normalize traces
         norm_trace_chanA = normalize_trace_excluding_stim(trace_chanA, z_stim_start, z_stim_end)
@@ -260,10 +340,15 @@ def plot_summary_traces(rois, stackA, stackB, z_stim_start, z_stim_end):
         all_zscore_traces_chanB.append(zscore_trace_chanB)
         
         # Plot individual traces
-        ax1.plot(norm_trace_chanA, 'r:', alpha=0.3)
-        ax1.plot(norm_trace_chanB, 'g:', alpha=0.3)
-        ax2.plot(zscore_trace_chanA, 'r:', alpha=0.3)
-        ax2.plot(zscore_trace_chanB, 'g:', alpha=0.3)
+        lineA1, = ax1.plot(norm_trace_chanA, 'r:', alpha=0.3)
+        lineB1, = ax1.plot(norm_trace_chanB, 'g:', alpha=0.3)
+        lineA2, = ax2.plot(zscore_trace_chanA, 'r:', alpha=0.3)
+        lineB2, = ax2.plot(zscore_trace_chanB, 'g:', alpha=0.3)
+        
+        plot_objects[roi_name] = {
+            'norm': {'A': lineA1, 'B': lineB1},
+            'zscore': {'A': lineA2, 'B': lineB2}
+        }
     
     # Calculate and plot average traces
     avg_norm_chanA = np.mean(all_norm_traces_chanA, axis=0)
@@ -272,10 +357,15 @@ def plot_summary_traces(rois, stackA, stackB, z_stim_start, z_stim_end):
     avg_zscore_chanB = np.mean(all_zscore_traces_chanB, axis=0)
     
     # Plot average traces
-    ax1.plot(avg_norm_chanA, 'r-', linewidth=2, label='Avg ChanA')
-    ax1.plot(avg_norm_chanB, 'g-', linewidth=2, label='Avg ChanB')
-    ax2.plot(avg_zscore_chanA, 'r-', linewidth=2, label='Avg ChanA')
-    ax2.plot(avg_zscore_chanB, 'g-', linewidth=2, label='Avg ChanB')
+    avg_lineA1, = ax1.plot(avg_norm_chanA, 'r-', linewidth=2, label='Avg ChanA')
+    avg_lineB1, = ax1.plot(avg_norm_chanB, 'g-', linewidth=2, label='Avg ChanB')
+    avg_lineA2, = ax2.plot(avg_zscore_chanA, 'r-', linewidth=2, label='Avg ChanA')
+    avg_lineB2, = ax2.plot(avg_zscore_chanB, 'g-', linewidth=2, label='Avg ChanB')
+    
+    plot_objects['avg'] = {
+        'norm': {'A': avg_lineA1, 'B': avg_lineB1},
+        'zscore': {'A': avg_lineA2, 'B': avg_lineB2}
+    }
     
     # Set titles and labels
     ax1.set_title('normalized traces')
@@ -288,6 +378,60 @@ def plot_summary_traces(rois, stackA, stackB, z_stim_start, z_stim_end):
     # Add legends
     ax1.legend()
     ax2.legend()
+    
+    # Add compensation slider
+    ax_slider = fig.add_subplot(gs[1])
+    slider = Slider(
+        ax=ax_slider,
+        label='Channel A Compensation (%)',
+        valmin=0,
+        valmax=30,
+        valinit=0,
+        valstep=1
+    )
+    
+    # Add tick marks and labels
+    slider.ax.set_xticks(range(0, 31, 1))  # Tick marks every 1%
+    slider.ax.set_xticklabels([str(x) if x % 5 == 0 else '' for x in range(0, 31, 1)])  # Labels every 5%
+    
+    # Add text label for current value
+    text_label = ax_slider.text(0.5, 0.5, 'Compensation: 0%', 
+                              transform=ax_slider.transAxes,
+                              ha='center', va='center')
+    
+    def update(val):
+        compensation = slider.val
+        text_label.set_text(f'Compensation: {compensation:.0f}%')
+        
+        # Update normalized traces
+        all_norm_compensated = []
+        all_zscore_compensated = []
+        
+        for roi_name, traces in raw_traces.items():
+            # Calculate compensated trace
+            compensated_trace = calculate_compensated_trace(traces['A'], traces['B'], compensation)
+            
+            # Normalize and Z-score compensated trace
+            norm_compensated = normalize_trace_excluding_stim(compensated_trace, z_stim_start, z_stim_end)
+            zscore_compensated = zscore_trace(compensated_trace, z_stim_start, z_stim_end)
+            
+            # Update individual traces
+            plot_objects[roi_name]['norm']['A'].set_ydata(norm_compensated)
+            plot_objects[roi_name]['zscore']['A'].set_ydata(zscore_compensated)
+            
+            all_norm_compensated.append(norm_compensated)
+            all_zscore_compensated.append(zscore_compensated)
+        
+        # Update average traces
+        avg_norm_compensated = np.mean(all_norm_compensated, axis=0)
+        avg_zscore_compensated = np.mean(all_zscore_compensated, axis=0)
+        
+        plot_objects['avg']['norm']['A'].set_ydata(avg_norm_compensated)
+        plot_objects['avg']['zscore']['A'].set_ydata(avg_zscore_compensated)
+        
+        fig.canvas.draw_idle()
+    
+    slider.on_changed(update)
     
     plt.tight_layout()
     plt.show()
