@@ -437,12 +437,47 @@ def plot_summary_traces(rois, stackA, stackB, z_stim_start, z_stim_end):
     plt.show()
 
 def main():
-    # Get directory path from command line argument
-    if len(sys.argv) != 2:
-        print("Usage: python quantify_rois.py <stks_directory_path>")
-        sys.exit(1)
+    # Set up argument parser
+    parser = argparse.ArgumentParser(description='Process tif stacks and create heatmaps')
+    parser.add_argument('directory', type=str, help='Directory containing ChanA_stk.tif and ChanB_stk.tif')
     
-    stks_dir = sys.argv[1]
+    # ChanA z-ranges with defaults
+    parser.add_argument('--z1_start_a', type=int, default=10, help='Start of first z-range for ChanA (default: 10)')
+    parser.add_argument('--z1_end_a', type=int, default=30, help='End of first z-range for ChanA (default: 30)')
+    parser.add_argument('--z2_start_a', type=int, default=40, help='Start of second z-range for ChanA (default: 40)')
+    parser.add_argument('--z2_end_a', type=int, default=70, help='End of second z-range for ChanA (default: 70)')
+    
+    # ChanB z-ranges with defaults
+    parser.add_argument('--z1_start_b', type=int, default=10, help='Start of first z-range for ChanB (default: 10)')
+    parser.add_argument('--z1_end_b', type=int, default=30, help='End of first z-range for ChanB (default: 30)')
+    parser.add_argument('--z2_start_b', type=int, default=40, help='Start of second z-range for ChanB (default: 40)')
+    parser.add_argument('--z2_end_b', type=int, default=55, help='End of second z-range for ChanB (default: 55)')
+    
+    # Stimulation range with defaults
+    parser.add_argument('--z_stim_start', type=int, default=35, help='Start of stimulation range (default: 35)')
+    parser.add_argument('--z_stim_end', type=int, default=40, help='End of stimulation range (default: 40)')
+    
+    args = parser.parse_args()
+    
+    # Print settings information
+    print("\n=== Settings Information ===")
+    print("Using default settings:", all([
+        args.z1_start_a == 10, args.z1_end_a == 30,
+        args.z2_start_a == 40, args.z2_end_a == 70,
+        args.z1_start_b == 10, args.z1_end_b == 30,
+        args.z2_start_b == 40, args.z2_end_b == 55,
+        args.z_stim_start == 35, args.z_stim_end == 40
+    ]))
+    print("\nChannel A Settings:")
+    print(f"z1 range: {args.z1_start_a}-{args.z1_end_a}")
+    print(f"z2 range: {args.z2_start_a}-{args.z2_end_a}")
+    print("\nChannel B Settings:")
+    print(f"z1 range: {args.z1_start_b}-{args.z1_end_b}")
+    print(f"z2 range: {args.z2_start_b}-{args.z2_end_b}")
+    print(f"\nStimulation range: {args.z_stim_start}-{args.z_stim_end}")
+    print("==========================\n")
+    
+    stks_dir = args.directory
     roi_dir = os.path.join(stks_dir, 'ROIs')  # ROIs are inside STKS folder
     
     # Check if directories exist
@@ -470,15 +505,11 @@ def main():
             roi_name = os.path.splitext(roi_file)[0]
             rois[roi_name] = load_roi(roi_path)
     
-    # Define stimulation range (you can make these command line arguments if needed)
-    z_stim_start = 35  # Default stimulation start
-    z_stim_end = 40    # Default stimulation end
-    
     # Plot ROIs on average image with traces
-    plot_rois_on_image(avg_chanB, rois, chanA_stack, chanB_stack, z_stim_start, z_stim_end)
+    plot_rois_on_image(avg_chanB, rois, chanA_stack, chanB_stack, args.z_stim_start, args.z_stim_end)
     
     # Plot summary traces
-    plot_summary_traces(rois, chanA_stack, chanB_stack, z_stim_start, z_stim_end)
+    plot_summary_traces(rois, chanA_stack, chanB_stack, args.z_stim_start, args.z_stim_end)
 
 if __name__ == '__main__':
     main() 
