@@ -25,16 +25,19 @@ Dependencies:
 - matplotlib: For data visualization
 - reportlab: For PDF generation
 - numpy: For numerical calculations
+- skimage: For image processing
 """
 
 import os
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from skimage import io
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from skimage.draw import polygon
 
 def find_excel_files(directory):
     """
@@ -120,15 +123,23 @@ def visualize_dataframe(df):
     ax.axis('tight')
     ax.axis('off')
     
+    # Create a copy of the DataFrame for display
+    display_df = df.copy()
+    
+    # Convert trace columns to compact format
+    for col in display_df.columns:
+        if 'trc' in col.lower():  # If column contains traces
+            display_df[col] = display_df[col].apply(lambda x: f"Trace [length: {len(x)}]" if isinstance(x, np.ndarray) else str(x))
+    
     # Convert all values to strings and right-align numbers
-    cell_text = df.applymap(str).values
+    cell_text = display_df.applymap(str).values
     
     # Create table
     table = ax.table(cellText=cell_text,
-                    colLabels=df.columns,
+                    colLabels=display_df.columns,
                     cellLoc='left',
                     loc='center',
-                    colColours=['lightblue']*len(df.columns))
+                    colColours=['lightblue']*len(display_df.columns))
     
     # Adjust font size and cell size
     table.auto_set_font_size(False)
@@ -138,8 +149,8 @@ def visualize_dataframe(df):
     table.scale(1.2, 2)
     
     # Color alternating rows for better readability
-    for i in range(len(df)):
-        for j in range(len(df.columns)):
+    for i in range(len(display_df)):
+        for j in range(len(display_df.columns)):
             cell = table[(i+1, j)]
             if i % 2 == 0:
                 cell.set_facecolor('#f0f0f0')
@@ -147,6 +158,88 @@ def visualize_dataframe(df):
     plt.title('ROI Database Overview', pad=20, size=14)
     plt.tight_layout()
     plt.show()
+
+def extract_roi_trace(tiff_path, roi_path):
+    """
+    Extract the average intensity trace from a TIFF stack for a given ROI.
+    
+    Args:
+        tiff_path (str): Path to the TIFF stack
+        roi_path (str): Path to the ROI coordinates file (.npy)
+        
+    Returns:
+        numpy.ndarray: Average intensity trace across z-slices
+    """
+    # Load the TIFF stack
+    stack = io.imread(tiff_path)
+    
+    # Load the ROI coordinates
+    roi_coords = np.load(roi_path)
+    
+    # Create a mask for the ROI
+    mask = np.zeros(stack.shape[1:], dtype=bool)
+    rr, cc = polygon(roi_coords[:, 1], roi_coords[:, 0], stack.shape[1:])
+    mask[rr, cc] = True
+    
+    # Calculate average intensity for each frame
+    trace = np.mean(stack[:, mask], axis=1)
+    
+    return trace
+
+def add_trace_columns(df, parent_directory):
+    """
+    Add ChanA and ChanB trace columns to the DataFrame.
+    
+    Args:
+        df (pandas.DataFrame): DataFrame containing ROI information
+        parent_directory (str): Path to the parent directory
+        
+    Returns:
+        pandas.DataFrame: Updated DataFrame with trace columns
+    """
+    # Initialize new columns
+    df['ChanA_raw_trc'] = None
+    df['ChanB_raw_trc'] = None
+    
+    # Process each row
+    for idx, row in df.iterrows():
+        # Construct paths
+        exp_dir = os.path.join(parent_directory, row['MOUSE'], row['EXP'], 'STKS')
+        roi_path = os.path.join(exp_dir, 'ROIs', f"ROI#{row['ROI#']}.npy")
+        
+        # Extract traces
+        chan_a_trace = extract_roi_trace(os.path.join(exp_dir, 'ChanA_stk.tif'), roi_path)
+        chan_b_trace = extract_roi_trace(os.path.join(exp_dir, 'ChanB_stk.tif'), roi_path)
+        
+        # Store traces
+        df.at[idx, 'ChanA_raw_trc'] = chan_a_trace
+        df.at[idx, 'ChanB_raw_trc'] = chan_b_trace
+    
+    return df
+
+def save_dataframe(df, parent_directory):
+    """
+    Save the DataFrame to a pickle file in the parent directory.
+    
+    Args:
+        df (pandas.DataFrame): DataFrame to save
+        parent_directory (str): Path to the parent directory
+    """
+    # Create the output path
+    output_path = os.path.join(parent_directory, 'ROI_quant_overview.pkl')
+    
+    # Save the DataFrame with full trace data as pickle
+    df.to_pickle(output_path)
+    print(f"\nSaved DataFrame to: {output_path}")
+    
+    # Also save a readable Excel version for reference (without traces)
+    excel_df = df.copy()
+    for col in excel_df.columns:
+        if 'trc' in col.lower():  # If column contains traces
+            excel_df[col] = excel_df[col].apply(lambda x: f"Trace [length: {len(x)}]" if isinstance(x, np.ndarray) else str(x))
+    excel_path = os.path.join(parent_directory, 'ROI_quant_overview.xlsx')
+    excel_df.to_excel(excel_path, index=False)
+    print(f"Also saved readable version to: {excel_path}")
 
 def main(parent_directory):
     """
@@ -171,6 +264,13 @@ def main(parent_directory):
     for file_path in excel_files:
         df = import_excel_data(file_path)
         if df is not None:
+            # Add trace columns
+            print("\nExtracting ROI traces...")
+            df = add_trace_columns(df, parent_directory)
+            
+            # Save the updated DataFrame
+            save_dataframe(df, parent_directory)
+            
             # Visualize the DataFrame
             visualize_dataframe(df)
             break  # Only process the first valid Excel file
