@@ -186,6 +186,32 @@ def extract_roi_trace(tiff_path, roi_path):
     
     return trace
 
+def find_stimulation_point(trace_a, trace_b):
+    """
+    Find the stimulation point in the traces by identifying the minimum value.
+    
+    Args:
+        trace_a (numpy.ndarray): Channel A trace
+        trace_b (numpy.ndarray): Channel B trace
+        
+    Returns:
+        int: Stimulation point frame number
+    """
+    # Find minimum values and their first occurrences
+    min_a_idx = np.where(trace_a == np.min(trace_a))[0][0]
+    min_b_idx = np.where(trace_b == np.min(trace_b))[0][0]
+    
+    # Set stimulation point one frame before minimum
+    stim_a = min_a_idx - 1
+    stim_b = min_b_idx - 1
+    
+    # Check if stimulation points are within 1 frame of each other
+    if abs(stim_a - stim_b) > 1:
+        raise ValueError(f"Stimulation points differ by more than 1 frame (A: {stim_a}, B: {stim_b})")
+    
+    # Return the earlier stimulation point
+    return min(stim_a, stim_b)
+
 def add_trace_columns(df, parent_directory):
     """
     Add ChanA and ChanB trace columns to the DataFrame.
@@ -200,6 +226,9 @@ def add_trace_columns(df, parent_directory):
     # Initialize new columns
     df['ChanA_raw_trc'] = None
     df['ChanB_raw_trc'] = None
+    df['Stim'] = None
+    df['ChanA_cut_trc'] = None
+    df['ChanB_cut_trc'] = None
     
     # Process each row
     for idx, row in df.iterrows():
@@ -214,6 +243,25 @@ def add_trace_columns(df, parent_directory):
         # Store traces
         df.at[idx, 'ChanA_raw_trc'] = chan_a_trace
         df.at[idx, 'ChanB_raw_trc'] = chan_b_trace
+        
+        try:
+            # Find and store stimulation point
+            stim_point = find_stimulation_point(chan_a_trace, chan_b_trace)
+            df.at[idx, 'Stim'] = stim_point
+            
+            # Create cut traces (15 frames before, 85 frames after stimulation)
+            start_idx = max(0, stim_point - 15)  # Ensure we don't go below 0
+            end_idx = min(len(chan_a_trace), stim_point + 85)  # Ensure we don't exceed trace length
+            
+            # Store cut traces
+            df.at[idx, 'ChanA_cut_trc'] = chan_a_trace[start_idx:end_idx]
+            df.at[idx, 'ChanB_cut_trc'] = chan_b_trace[start_idx:end_idx]
+            
+        except ValueError as e:
+            print(f"Warning: {e} for ROI {row['ROI#']} in {row['EXP']}")
+            df.at[idx, 'Stim'] = None
+            df.at[idx, 'ChanA_cut_trc'] = None
+            df.at[idx, 'ChanB_cut_trc'] = None
     
     return df
 
