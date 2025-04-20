@@ -212,6 +212,70 @@ def find_stimulation_point(trace_a, trace_b):
     # Return the earlier stimulation point
     return min(stim_a, stim_b)
 
+def normalize_trace(trace, exclude_start=12, exclude_end=20):
+    """
+    Normalize a trace to have 25th lowest value at 0 and maximum value of 1.
+    Excludes values from exclude_start to exclude_end frames in the normalization.
+    
+    Args:
+        trace (numpy.ndarray): Input trace to normalize
+        exclude_start (int): Start frame to exclude from normalization
+        exclude_end (int): End frame to exclude from normalization
+        
+    Returns:
+        numpy.ndarray: Normalized trace
+    """
+    # Create a mask for the frames to exclude
+    exclude_mask = np.ones(len(trace), dtype=bool)
+    exclude_mask[exclude_start:exclude_end] = False
+    
+    # Get values from non-excluded frames
+    valid_values = trace[exclude_mask]
+    
+    # Sort the values and get the 25th lowest value
+    sorted_values = np.sort(valid_values)
+    min_val = sorted_values[24]  # 25th lowest value (0-based index)
+    
+    # Get max value from non-excluded frames
+    max_val = np.max(valid_values)
+    
+    # Normalize the trace
+    normalized = (trace - min_val) / (max_val - min_val)
+    
+    return normalized
+
+def z_score_trace(trace, exclude_start=12, exclude_end=20):
+    """
+    Create z-scored trace using 25th lowest value as baseline and standard deviation
+    from non-excluded frames. Excludes values from exclude_start to exclude_end frames.
+    
+    Args:
+        trace (numpy.ndarray): Input trace to z-score
+        exclude_start (int): Start frame to exclude from calculation
+        exclude_end (int): End frame to exclude from calculation
+        
+    Returns:
+        numpy.ndarray: Z-scored trace
+    """
+    # Create a mask for the frames to exclude
+    exclude_mask = np.ones(len(trace), dtype=bool)
+    exclude_mask[exclude_start:exclude_end] = False
+    
+    # Get values from non-excluded frames
+    valid_values = trace[exclude_mask]
+    
+    # Sort the values and get the 25th lowest value
+    sorted_values = np.sort(valid_values)
+    baseline = sorted_values[24]  # 25th lowest value (0-based index)
+    
+    # Calculate standard deviation from non-excluded frames
+    std = np.std(valid_values)
+    
+    # Z-score the trace
+    z_scored = (trace - baseline) / std
+    
+    return z_scored
+
 def add_trace_columns(df, parent_directory):
     """
     Add ChanA and ChanB trace columns to the DataFrame.
@@ -226,9 +290,14 @@ def add_trace_columns(df, parent_directory):
     # Initialize new columns
     df['ChanA_raw_trc'] = None
     df['ChanB_raw_trc'] = None
+    df['ChanA_comp_trc'] = None  # New column for compensated trace
     df['Stim'] = None
     df['ChanA_cut_trc'] = None
     df['ChanB_cut_trc'] = None
+    df['ChanA_norm_trc'] = None
+    df['ChanB_norm_trc'] = None
+    df['ChanA_Z_trc'] = None
+    df['ChanB_Z_trc'] = None
     
     # Process each row
     for idx, row in df.iterrows():
@@ -240,28 +309,45 @@ def add_trace_columns(df, parent_directory):
         chan_a_trace = extract_roi_trace(os.path.join(exp_dir, 'ChanA_stk.tif'), roi_path)
         chan_b_trace = extract_roi_trace(os.path.join(exp_dir, 'ChanB_stk.tif'), roi_path)
         
-        # Store traces
+        # Store raw traces
         df.at[idx, 'ChanA_raw_trc'] = chan_a_trace
         df.at[idx, 'ChanB_raw_trc'] = chan_b_trace
         
+        # Apply compensation to Channel A
+        compensation_factor = 0.15
+        chan_a_comp = chan_a_trace - (compensation_factor * chan_b_trace)
+        df.at[idx, 'ChanA_comp_trc'] = chan_a_comp
+        
         try:
-            # Find and store stimulation point
-            stim_point = find_stimulation_point(chan_a_trace, chan_b_trace)
+            # Find and store stimulation point using compensated trace
+            stim_point = find_stimulation_point(chan_a_comp, chan_b_trace)
             df.at[idx, 'Stim'] = stim_point
             
             # Create cut traces (15 frames before, 85 frames after stimulation)
             start_idx = max(0, stim_point - 15)  # Ensure we don't go below 0
-            end_idx = min(len(chan_a_trace), stim_point + 85)  # Ensure we don't exceed trace length
+            end_idx = min(len(chan_a_comp), stim_point + 85)  # Ensure we don't exceed trace length
             
-            # Store cut traces
-            df.at[idx, 'ChanA_cut_trc'] = chan_a_trace[start_idx:end_idx]
+            # Store cut traces (using compensated trace for Channel A)
+            df.at[idx, 'ChanA_cut_trc'] = chan_a_comp[start_idx:end_idx]
             df.at[idx, 'ChanB_cut_trc'] = chan_b_trace[start_idx:end_idx]
+            
+            # Normalize cut traces
+            df.at[idx, 'ChanA_norm_trc'] = normalize_trace(chan_a_comp[start_idx:end_idx])
+            df.at[idx, 'ChanB_norm_trc'] = normalize_trace(chan_b_trace[start_idx:end_idx])
+            
+            # Z-score cut traces
+            df.at[idx, 'ChanA_Z_trc'] = z_score_trace(chan_a_comp[start_idx:end_idx])
+            df.at[idx, 'ChanB_Z_trc'] = z_score_trace(chan_b_trace[start_idx:end_idx])
             
         except ValueError as e:
             print(f"Warning: {e} for ROI {row['ROI#']} in {row['EXP']}")
             df.at[idx, 'Stim'] = None
             df.at[idx, 'ChanA_cut_trc'] = None
             df.at[idx, 'ChanB_cut_trc'] = None
+            df.at[idx, 'ChanA_norm_trc'] = None
+            df.at[idx, 'ChanB_norm_trc'] = None
+            df.at[idx, 'ChanA_Z_trc'] = None
+            df.at[idx, 'ChanB_Z_trc'] = None
     
     return df
 
