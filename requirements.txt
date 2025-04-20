@@ -4,3 +4,5 @@ tifffile>=2025.2.0
 Pillow>=11.1.0
 tqdm>=4.66.0
 scikit-image>=0.21.0
+pandas>=2.0.0
+reportlab>=4.0.0
