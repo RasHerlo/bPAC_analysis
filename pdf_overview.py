@@ -103,7 +103,7 @@ def generate_pdf_report(df, parent_directory, output_path):
             stack = imread(tif_path)
             avg_image = create_average_image(stack)
             
-            # Create a new page
+            # Create a new page for the average image
             fig = plt.figure(figsize=(12, 6))
             
             # Plot average image on the left
@@ -129,20 +129,17 @@ def generate_pdf_report(df, parent_directory, output_path):
                     roi_coords = np.load(roi_path)
                     print(f"ROI coordinates shape: {roi_coords.shape}")
                     rois.append(roi_coords)
+                    roi_coords_closed = np.vstack([roi_coords, roi_coords[0]])
+                    ax2.plot(roi_coords_closed[:, 0], roi_coords_closed[:, 1], 'r-', linewidth=2)
+                    center_x = np.mean(roi_coords[:, 0])
+                    center_y = np.mean(roi_coords[:, 1])
+                    ax2.text(center_x, center_y, f'ROI {row["ROI#"]}', color='red',
+                            horizontalalignment='center', verticalalignment='center',
+                            bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'))
                 else:
                     print(f"ROI file not found: {roi_path}")
             
             print(f"Found {len(rois)} ROIs for mouse {mouse}")
-            
-            # Plot ROIs
-            for i, roi_coords in enumerate(rois):
-                roi_coords_closed = np.vstack([roi_coords, roi_coords[0]])
-                ax2.plot(roi_coords_closed[:, 0], roi_coords_closed[:, 1], 'r-', linewidth=2)
-                center_x = np.mean(roi_coords[:, 0])
-                center_y = np.mean(roi_coords[:, 1])
-                ax2.text(center_x, center_y, f'ROI {i+1}', color='red',
-                        horizontalalignment='center', verticalalignment='center',
-                        bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'))
             
             ax2.set_title(f'ROIs - {mouse}')
             ax2.axis('off')
@@ -150,6 +147,67 @@ def generate_pdf_report(df, parent_directory, output_path):
             plt.tight_layout()
             pdf.savefig(fig)
             plt.close()
+            
+            # Create a new page for each entry's detailed plots
+            for _, row in mouse_data.iterrows():
+                # Create a new figure for this entry
+                fig = plt.figure(figsize=(15, 5))
+                
+                # 1. ROI zoom-in
+                ax1 = fig.add_subplot(131)
+                roi_coords = np.load(os.path.join(stks_dir, 'ROIs', f"ROI#{row['ROI#']}.npy"))
+                center_x = np.mean(roi_coords[:, 0])
+                center_y = np.mean(roi_coords[:, 1])
+                
+                # Calculate ROI dimensions
+                width = np.max(roi_coords[:, 0]) - np.min(roi_coords[:, 0])
+                height = np.max(roi_coords[:, 1]) - np.min(roi_coords[:, 1])
+                max_dim = max(width, height) * 1.2  # 20% larger
+                
+                # Create square crop
+                y_min = max(0, int(center_y - max_dim/2))
+                y_max = min(avg_image.shape[0], int(center_y + max_dim/2))
+                x_min = max(0, int(center_x - max_dim/2))
+                x_max = min(avg_image.shape[1], int(center_x + max_dim/2))
+                
+                # Ensure square dimensions
+                crop_size = min(y_max - y_min, x_max - x_min)
+                y_center = (y_min + y_max) // 2
+                x_center = (x_min + x_max) // 2
+                y_min = y_center - crop_size // 2
+                y_max = y_center + crop_size // 2
+                x_min = x_center - crop_size // 2
+                x_max = x_center + crop_size // 2
+                
+                # Plot the zoomed ROI
+                ax1.imshow(avg_image[y_min:y_max, x_min:x_max], cmap='viridis')
+                ax1.set_title(f'ROI#{row["ROI#"]}')
+                ax1.axis('off')
+                
+                # 2. Normalized traces
+                ax2 = fig.add_subplot(132)
+                ax2.plot(row['ChanA_norm_trc'], 'r-', label='ChanA')
+                ax2.plot(row['ChanB_norm_trc'], 'g-', label='ChanB')
+                ax2.set_title(row['EXP'])
+                ax2.set_xlabel('Frames')
+                ax2.set_ylabel('Normalized values')
+                ax2.set_ylim([-0.5, 1.5])  # Set fixed y-axis limits for normalized traces
+                ax2.legend()
+                
+                # 3. Z-scored traces
+                ax3 = fig.add_subplot(133)
+                ax3.plot(row['ChanA_Z_trc'], 'r-', label='ChanA')
+                ax3.plot(row['ChanB_Z_trc'], 'g-', label='ChanB')
+                ax3.set_xlabel('Frames')
+                ax3.set_ylabel('Z-scored values')
+                # Set y-axis limits for z-scored traces
+                max_chanA = np.max(row['ChanA_Z_trc'])
+                ax3.set_ylim([-1, 1.5 * max_chanA])
+                ax3.legend()
+                
+                plt.tight_layout()
+                pdf.savefig(fig)
+                plt.close()
 
 def main(parent_directory):
     """
