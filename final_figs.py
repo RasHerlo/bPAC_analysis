@@ -176,21 +176,29 @@ def generate_example_figure(df, parent_directory, output_path):
     
     # 2. GCaMP6s trace (top right)
     ax2 = fig.add_subplot(gs[0, 1])
-    x = np.arange(len(entry['ChanB_Z_trc']))
+    frames = np.arange(len(entry['ChanB_Z_trc']))
+    time = frames * 2.2 - 33  # Convert frames to seconds and shift so frame 15 is at 0
     y_smooth = smooth_trace(entry['ChanB_Z_trc'], is_gcamp=True)  # Use stronger smoothing for GCaMP
     
     # Add baseline at y=0
-    ax2.plot([0, len(entry['ChanB_Z_trc'])], [0, 0], 'k--', linewidth=0.5)
+    ax2.plot([time[0], time[-1]], [0, 0], 'k--', linewidth=0.5)
     
     # Add vertical cyan line from frame 15 to 16
-    ax2.fill_betweenx([0, 35], 15, 16, color='cyan', alpha=0.3)
+    stim_start = 0  # Now at 0 seconds
+    stim_end = 2.2  # 1 frame later
+    ax2.fill_betweenx([0, 35], stim_start, stim_end, color='cyan', alpha=0.3)
     
-    ax2.scatter(x, entry['ChanB_Z_trc'], color='green', s=10, alpha=0.5)
-    ax2.plot(x, y_smooth, 'k-', linewidth=1)
+    ax2.scatter(time, entry['ChanB_Z_trc'], color='green', s=10, alpha=0.5)
+    ax2.plot(time, y_smooth, 'k-', linewidth=1)
     ax2.set_title('GCaMP6s')
-    ax2.set_xlabel('Frames')
+    ax2.set_xlabel('Time (s)')
     ax2.set_ylabel('Z-scored values')
     ax2.set_ylim([-1, 35])  # Set y-axis range
+    ax2.set_xlim([-30, 150])  # Set x-axis limit
+    
+    # Add ticks at specified time points
+    ax2.set_xticks([-30, 0, 30, 60, 90, 120, 150])
+    ax2.set_xticklabels(['-30', '0', '30', '60', '90', '120', '150'])
     
     # Remove top and right spines
     ax2.spines['top'].set_visible(False)
@@ -198,21 +206,27 @@ def generate_example_figure(df, parent_directory, output_path):
     
     # 3. PinkFlamindo trace (bottom right)
     ax3 = fig.add_subplot(gs[1, 1])
-    x = np.arange(len(entry['ChanA_Z_trc']))
+    frames = np.arange(len(entry['ChanA_Z_trc']))
+    time = frames * 2.2 - 33  # Convert frames to seconds and shift so frame 15 is at 0
     y_smooth = smooth_trace(entry['ChanA_Z_trc'], is_gcamp=False)  # Use original smoothing for PinkFlamindo
     
     # Add baseline at y=0
-    ax3.plot([0, len(entry['ChanA_Z_trc'])], [0, 0], 'k--', linewidth=0.5)
+    ax3.plot([time[0], time[-1]], [0, 0], 'k--', linewidth=0.5)
     
     # Add vertical cyan line from frame 15 to 16
-    ax3.fill_betweenx([0, 4], 15, 16, color='cyan', alpha=0.3)
+    ax3.fill_betweenx([0, 4], stim_start, stim_end, color='cyan', alpha=0.3)
     
-    ax3.scatter(x, entry['ChanA_Z_trc'], color='red', s=10, alpha=0.5)
-    ax3.plot(x, y_smooth, 'k-', linewidth=1)
+    ax3.scatter(time, entry['ChanA_Z_trc'], color='red', s=10, alpha=0.5)
+    ax3.plot(time, y_smooth, 'k-', linewidth=1)
     ax3.set_title('PinkFlamindo')
-    ax3.set_xlabel('Frames')
+    ax3.set_xlabel('Time (s)')
     ax3.set_ylabel('Z-scored values')
     ax3.set_ylim([-1, 4])  # Set y-axis range
+    ax3.set_xlim([-30, 150])  # Set x-axis limit
+    
+    # Add ticks at specified time points
+    ax3.set_xticks([-30, 0, 30, 60, 90, 120, 150])
+    ax3.set_xticklabels(['-30', '0', '30', '60', '90', '120', '150'])
     
     # Remove top and right spines
     ax3.spines['top'].set_visible(False)
@@ -231,6 +245,77 @@ def generate_example_figure(df, parent_directory, output_path):
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close()
 
+def generate_mean_traces_figure(df, output_path):
+    """
+    Generate a figure showing mean traces with standard deviation for both channels.
+    
+    Args:
+        df (pandas.DataFrame): DataFrame containing ROI data
+        output_path (str): Path to save the figure
+    """
+    # Calculate mean and std for both channels
+    chanB_traces = np.array(df['ChanB_Z_trc'].tolist())
+    chanA_traces = np.array(df['ChanA_Z_trc'].tolist())
+    
+    mean_chanB = np.mean(chanB_traces, axis=0)
+    std_chanB = np.std(chanB_traces, axis=0)
+    mean_chanA = np.mean(chanA_traces, axis=0)
+    std_chanA = np.std(chanA_traces, axis=0)
+    
+    # Create figure with two subplots
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6), sharex=True)
+    
+    # Convert frames to time and shift so frame 15 is at 0
+    frames = np.arange(len(mean_chanB))
+    time = frames * 2.2 - 33  # Convert frames to seconds and shift
+    
+    # Plot ChanB (GCaMP6s)
+    ax1.fill_between(time, mean_chanB - std_chanB, mean_chanB + std_chanB, color='gray', alpha=0.3)
+    ax1.plot([time[0], time[-1]], [0, 0], 'k--', linewidth=0.5)  # Baseline
+    ax1.plot(time, mean_chanB, 'g-', marker='o', markersize=3, linewidth=1)
+    
+    # Add vertical cyan line for stimulation (GCaMP6s)
+    stim_start = 0  # Now at 0 seconds
+    stim_end = 2.2  # 1 frame later
+    ax1.fill_betweenx([0, 15], stim_start, stim_end, color='cyan', alpha=0.3)
+    
+    ax1.set_title('GCaMP6s')
+    ax1.set_ylabel('Z-scored values')
+    ax1.set_ylim([-1, None])
+    ax1.set_xlim([-30, 150])  # Set x-axis limit
+    ax1.legend(['N = 3, n = 22'])
+    
+    # Add ticks at specified time points
+    ax1.set_xticks([-30, 0, 30, 60, 90, 120, 150])
+    ax1.set_xticklabels(['-30', '0', '30', '60', '90', '120', '150'])
+    
+    # Plot ChanA (PinkFlamindo)
+    ax2.fill_between(time, mean_chanA - std_chanA, mean_chanA + std_chanA, color='gray', alpha=0.3)
+    ax2.plot([time[0], time[-1]], [0, 0], 'k--', linewidth=0.5)  # Baseline
+    ax2.plot(time, mean_chanA, 'r-', marker='o', markersize=3, linewidth=1)
+    
+    # Add vertical cyan line for stimulation (PinkFlamindo)
+    ax2.fill_betweenx([0, 2.2], stim_start, stim_end, color='cyan', alpha=0.3)
+    
+    ax2.set_title('PinkFlamindo')
+    ax2.set_xlabel('Time (s)')
+    ax2.set_ylabel('Z-scored values')
+    ax2.set_ylim([-1, None])
+    ax2.set_xlim([-30, 150])  # Set x-axis limit
+    
+    # Add ticks at specified time points
+    ax2.set_xticks([-30, 0, 30, 60, 90, 120, 150])
+    ax2.set_xticklabels(['-30', '0', '30', '60', '90', '120', '150'])
+    
+    # Remove top and right spines from both plots
+    for ax in [ax1, ax2]:
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+    
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
 def main(parent_directory):
     """
     Main function to generate the final figures.
@@ -243,9 +328,14 @@ def main(parent_directory):
     df = load_pickle_data(pickle_path)
     
     # Generate the example figure
-    output_path = os.path.join(parent_directory, 'example_figure.png')
-    generate_example_figure(df, parent_directory, output_path)
-    print(f"\nExample figure generated: {output_path}")
+    example_output_path = os.path.join(parent_directory, 'example_figure.png')
+    generate_example_figure(df, parent_directory, example_output_path)
+    print(f"\nExample figure generated: {example_output_path}")
+    
+    # Generate the mean traces figure
+    mean_traces_output_path = os.path.join(parent_directory, 'mean_traces_figure.png')
+    generate_mean_traces_figure(df, mean_traces_output_path)
+    print(f"Mean traces figure generated: {mean_traces_output_path}")
 
 if __name__ == "__main__":
     import sys
