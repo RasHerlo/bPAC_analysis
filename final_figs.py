@@ -14,6 +14,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from tifffile import imread
 from scipy.signal import savgol_filter
+from scipy.ndimage import gaussian_filter1d
+from statsmodels.nonparametric.smoothers_lowess import lowess
 
 def load_pickle_data(pickle_path):
     """
@@ -52,12 +54,13 @@ def enhance_contrast(image):
     p05, p995 = np.percentile(image, (0.5, 99.5))  # Using 0.5th to 99.5th percentile for gentler enhancement
     return image, p05, p995
 
-def smooth_trace(trace):
+def smooth_trace(trace, is_gcamp=False):
     """
-    Smooth the trace using a Savitzky-Golay filter, ignoring frames 15-18.
+    Smooth the trace using LOWESS (Locally Weighted Scatterplot Smoothing), ignoring frames 15-18.
     
     Args:
         trace (numpy.ndarray): The original trace
+        is_gcamp (bool): Whether this is a GCaMP6s trace (uses stronger smoothing)
         
     Returns:
         numpy.ndarray: The smoothed trace
@@ -72,24 +75,38 @@ def smooth_trace(trace):
     # Set frames 15-18 to NaN for smoothing
     smoothed[frames_to_ignore] = np.nan
     
-    # Find valid indices (not NaN)
-    valid_indices = ~np.isnan(smoothed)
+    # Create a mask for valid values
+    valid_mask = ~np.isnan(smoothed)
+    x = np.arange(len(trace))
     
-    # Create x values for valid points
-    x = np.arange(len(trace))[valid_indices]
-    y = smoothed[valid_indices]
+    # Apply LOWESS smoothing with different parameters for GCaMP and PinkFlamindo
+    if is_gcamp:
+        frac = 0.3  # Stronger smoothing for GCaMP (30% of data used for each estimation)
+    else:
+        frac = 0.2  # Gentler smoothing for PinkFlamindo (20% of data used for each estimation)
     
-    # Apply Savitzky-Golay filter to valid points
-    window_length = min(15, len(y) - 1 if len(y) % 2 == 0 else len(y) - 2)
-    poly_order = 3
+    # Apply LOWESS only to valid points
+    x_valid = x[valid_mask]
+    y_valid = smoothed[valid_mask]
     
-    # Smooth the valid points
-    smoothed[valid_indices] = savgol_filter(y, window_length, poly_order)
+    # Perform LOWESS smoothing
+    smoothed_valid = lowess(
+        y_valid,
+        x_valid,
+        frac=frac,          # The fraction of data used for smoothing
+        it=1,              # Number of robustifying iterations
+        delta=0.1,         # Distance within which to use linear-interpolation instead of weighted regression
+        return_sorted=False # Return values at input x points
+    )
+    
+    # Create output array
+    result = smoothed.copy()
+    result[valid_mask] = smoothed_valid
     
     # Restore the original values for frames 15-18
-    smoothed[frames_to_ignore] = ignored_values
+    result[frames_to_ignore] = ignored_values
     
-    return smoothed
+    return result
 
 def generate_example_figure(df, parent_directory, output_path):
     """
@@ -127,7 +144,7 @@ def generate_example_figure(df, parent_directory, output_path):
     
     # Create figure with custom layout
     fig = plt.figure(figsize=(12, 8))
-    gs = fig.add_gridspec(2, 2, width_ratios=[1, 1], height_ratios=[1, 1])
+    gs = fig.add_gridspec(2, 2, width_ratios=[1, 1], height_ratios=[1, 1], hspace=0.05)
     
     # 1. Average image with zoom-in
     ax1 = fig.add_subplot(gs[:, 0])
@@ -160,32 +177,55 @@ def generate_example_figure(df, parent_directory, output_path):
     # 2. GCaMP6s trace (top right)
     ax2 = fig.add_subplot(gs[0, 1])
     x = np.arange(len(entry['ChanB_Z_trc']))
-    y_smooth = smooth_trace(entry['ChanB_Z_trc'])
+    y_smooth = smooth_trace(entry['ChanB_Z_trc'], is_gcamp=True)  # Use stronger smoothing for GCaMP
     
     # Add baseline at y=0
     ax2.plot([0, len(entry['ChanB_Z_trc'])], [0, 0], 'k--', linewidth=0.5)
+    
+    # Add vertical cyan line from frame 15 to 16
+    ax2.fill_betweenx([0, 35], 15, 16, color='cyan', alpha=0.3)
     
     ax2.scatter(x, entry['ChanB_Z_trc'], color='green', s=10, alpha=0.5)
     ax2.plot(x, y_smooth, 'k-', linewidth=1)
     ax2.set_title('GCaMP6s')
     ax2.set_xlabel('Frames')
     ax2.set_ylabel('Z-scored values')
-    ax2.set_ylim([-1, None])  # Set lower limit to -1
+    ax2.set_ylim([-1, 35])  # Set y-axis range
+    
+    # Remove top and right spines
+    ax2.spines['top'].set_visible(False)
+    ax2.spines['right'].set_visible(False)
     
     # 3. PinkFlamindo trace (bottom right)
     ax3 = fig.add_subplot(gs[1, 1])
     x = np.arange(len(entry['ChanA_Z_trc']))
-    y_smooth = smooth_trace(entry['ChanA_Z_trc'])
+    y_smooth = smooth_trace(entry['ChanA_Z_trc'], is_gcamp=False)  # Use original smoothing for PinkFlamindo
     
     # Add baseline at y=0
     ax3.plot([0, len(entry['ChanA_Z_trc'])], [0, 0], 'k--', linewidth=0.5)
+    
+    # Add vertical cyan line from frame 15 to 16
+    ax3.fill_betweenx([0, 4], 15, 16, color='cyan', alpha=0.3)
     
     ax3.scatter(x, entry['ChanA_Z_trc'], color='red', s=10, alpha=0.5)
     ax3.plot(x, y_smooth, 'k-', linewidth=1)
     ax3.set_title('PinkFlamindo')
     ax3.set_xlabel('Frames')
     ax3.set_ylabel('Z-scored values')
-    ax3.set_ylim([-1, None])  # Set lower limit to -1
+    ax3.set_ylim([-1, 4])  # Set y-axis range
+    
+    # Remove top and right spines
+    ax3.spines['top'].set_visible(False)
+    ax3.spines['right'].set_visible(False)
+    
+    # Adjust subplot positions to align with image edges and prevent overlap
+    pos1 = ax1.get_position()
+    total_height = pos1.height
+    subplot_height = total_height * 0.4  # Make each subplot 40% of the total height
+    
+    # Set new positions
+    ax2.set_position([pos1.x1 + 0.05, pos1.y1 - subplot_height, pos1.width, subplot_height])
+    ax3.set_position([pos1.x1 + 0.05, pos1.y0, pos1.width, subplot_height])
     
     plt.tight_layout()
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
