@@ -20,15 +20,23 @@ The typical workflow for analyzing bPAC data is as follows:
    - Generates normalized and Z-scored traces
    - Provides interactive compensation adjustment
 
-4. **ROI Quantification Overview** (`ROI_quant_overview.py`)
+4. **Create Excel File** (Manual Step)
+   - After running `quantify_rois.py`, create an Excel file containing:
+     - `MOUSE` - The mouse identifier
+     - `EXP` - The experiment identifier
+     - `ROI#` - The ROI number
+   - This file will be used as input for the next step
+
+5. **ROI Quantification Overview** (`ROI_quant_overview.py`)
    - Creates summary statistics for all ROIs
    - Generates overview plots of ROI measurements
+   - Uses the manually created Excel file as input
 
-5. **PDF Overview** (`pdf_overview.py`)
+6. **PDF Overview** (`pdf_overview.py`)
    - Creates a PDF report with all analysis results
    - Includes heatmaps, traces, and statistics
 
-6. **Final Figures** (`final_figs.py`)
+7. **Final Figures** (`final_figs.py`)
    - Generates publication-quality figures
    - Combines data from multiple experiments
 
@@ -55,6 +63,7 @@ The scripts can be run with default settings:
 python generate_stks.py "path/to/directory"
 python bPAC_detect_and_trace.py "path/to/directory"
 python quantify_rois.py "path/to/directory"
+# Create Excel file manually here
 python ROI_quant_overview.py "path/to/directory"
 python pdf_overview.py "path/to/directory"
 python final_figs.py "path/to/directory"
@@ -90,3 +99,43 @@ The analysis generates:
 4. Normalized and Z-scored data
 5. PDF reports
 6. Publication-quality figures
+
+### Excel File Requirements for ROI_quant_overview.py
+
+The input Excel file for `ROI_quant_overview.py` should contain the following required columns:
+
+1. `MOUSE` - The mouse identifier
+2. `EXP` - The experiment identifier
+3. `ROI#` - The ROI number
+
+The script will automatically add the following columns during processing:
+1. `ChanA_raw_trc` - Raw trace from Channel A
+2. `ChanB_raw_trc` - Raw trace from Channel B
+3. `ChanA_comp_trc` - Compensated trace for Channel A (raw - 0.15 * Channel B)
+4. `Stim` - Stimulation point frame number
+5. `ChanA_cut_trc` - Cut trace for Channel A (15 frames before to 85 frames after stimulation)
+6. `ChanB_cut_trc` - Cut trace for Channel B (15 frames before to 85 frames after stimulation)
+7. `ChanA_norm_trc` - Normalized trace for Channel A
+8. `ChanB_norm_trc` - Normalized trace for Channel B
+9. `ChanA_Z_trc` - Z-scored trace for Channel A
+10. `ChanB_Z_trc` - Z-scored trace for Channel B
+
+The script expects the Excel file to be in a directory structure where:
+- The Excel file can be in any subdirectory of the parent directory
+- The TIFF stacks should be in a `STKS` subdirectory
+- The ROI files should be in a `ROIs` subdirectory within the `STKS` directory
+
+Example directory structure:
+```
+parent_directory/
+├── Excel_file.xlsx
+└── MOUSE/
+    └── EXP/
+        └── STKS/
+            ├── ChanA_stk.tif
+            ├── ChanB_stk.tif
+            └── ROIs/
+                ├── ROI#1.npy
+                ├── ROI#2.npy
+                └── ...
+```
