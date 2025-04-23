@@ -157,12 +157,15 @@ def plot_rois_on_image(avg_image, rois, stackA, stackB, z_stim_start, z_stim_end
     """
     # Calculate figure size based on number of ROIs
     n_rois = len(rois)
-    n_rows = max(3, 3 + ((n_rois - 3) + 1) // 2)  # At least 3 rows, add rows for additional ROIs
-    n_cols = 6  # 3 for main image + 3 for ROI details
+    n_cols = 9  # 3 for main image + 6 for ROI details (2 columns per ROI)
+    n_rows = max(3, 3 + ((n_rois - 2) + 2) // 3)  # At least 3 rows, add rows for additional ROIs
     
-    # Create figure with appropriate size
-    fig = plt.figure(figsize=(n_cols * 3, n_rows * 3 + 1))  # Extra space for slider
-    gs = plt.GridSpec(n_rows + 1, n_cols, figure=fig)  # Extra row for slider
+    # Create figure with appropriate size and increased height per row
+    row_height = 4  # Increased from 3 to 4 for better vertical spacing
+    fig = plt.figure(figsize=(n_cols * 3, n_rows * row_height + 1))  # Extra space for slider
+    
+    # Create grid with more space between rows
+    gs = plt.GridSpec(n_rows + 1, n_cols, figure=fig, hspace=0.5)  # Increased hspace for better vertical spacing
     
     # Plot main image in upper left (3x3)
     ax_main = fig.add_subplot(gs[0:3, 0:3])
@@ -186,12 +189,12 @@ def plot_rois_on_image(avg_image, rois, stackA, stackB, z_stim_start, z_stim_end
     # Plot each ROI and its trace
     for i, (roi_name, roi_coords) in enumerate(rois.items()):
         # Calculate row and column for this ROI
-        if i < 3:
+        if i < 2:
             row = i
-            col = 3
+            base_col = 3
         else:
-            row = 3 + ((i - 3) // 2)
-            col = 0 if (i - 3) % 2 == 0 else 3
+            row = 3 + ((i - 2) // 3)
+            base_col = 3 * ((i - 2) % 3)
         
         # Calculate ROI bounds with 5-pixel margin
         y_min = max(0, int(min(roi_coords[:, 1]) - 5))
@@ -200,7 +203,7 @@ def plot_rois_on_image(avg_image, rois, stackA, stackB, z_stim_start, z_stim_end
         x_max = min(avg_image.shape[1], int(max(roi_coords[:, 0]) + 5))
         
         # Plot ROI cut-out
-        ax_roi = fig.add_subplot(gs[row, col])
+        ax_roi = fig.add_subplot(gs[row, base_col:base_col+1])
         roi_cutout = avg_image[y_min:y_max, x_min:x_max]
         ax_roi.imshow(roi_cutout, cmap='viridis')
         ax_roi.set_title(f'ROI: {roi_name}')
@@ -212,7 +215,7 @@ def plot_rois_on_image(avg_image, rois, stackA, stackB, z_stim_start, z_stim_end
         ax_roi.plot(roi_coords_relative[:, 0], roi_coords_relative[:, 1], 'r-', linewidth=1)
         
         # Calculate and plot traces from both channels
-        ax_trace = fig.add_subplot(gs[row, col+1:col+3])
+        ax_trace = fig.add_subplot(gs[row, base_col+1:base_col+3])
         trace_chanA = calculate_roi_trace(stackA, roi_coords)
         trace_chanB = calculate_roi_trace(stackB, roi_coords)
         
@@ -230,7 +233,6 @@ def plot_rois_on_image(avg_image, rois, stackA, stackB, z_stim_start, z_stim_end
         
         ax_trace.legend()
         ax_trace.set_title(f'Normalized Traces: {roi_name}')
-        ax_trace.set_xlabel('Frame')
         ax_trace.set_ylabel('Normalized Intensity')
         
         # Add stimulation range indicator
@@ -375,6 +377,10 @@ def plot_summary_traces(rois, stackA, stackB, z_stim_start, z_stim_end):
     ax1.set_ylabel('Normalized Intensity')
     ax2.set_ylabel('Z-score')
     
+    # Set y-axis limits
+    ax1.set_ylim(0, 1.25)  # Normalized traces from 0 to 1.25
+    ax2.set_ylim(-1, None)  # Z-scored traces from -1 upwards
+    
     # Add legends
     ax1.legend()
     ax2.legend()
@@ -444,18 +450,18 @@ def main():
     # ChanA z-ranges with defaults
     parser.add_argument('--z1_start_a', type=int, default=10, help='Start of first z-range for ChanA (default: 10)')
     parser.add_argument('--z1_end_a', type=int, default=30, help='End of first z-range for ChanA (default: 30)')
-    parser.add_argument('--z2_start_a', type=int, default=40, help='Start of second z-range for ChanA (default: 40)')
-    parser.add_argument('--z2_end_a', type=int, default=70, help='End of second z-range for ChanA (default: 70)')
+    parser.add_argument('--z2_start_a', type=int, default=210, help='Start of second z-range for ChanA (default: 210)')
+    parser.add_argument('--z2_end_a', type=int, default=245, help='End of second z-range for ChanA (default: 245)')
     
     # ChanB z-ranges with defaults
     parser.add_argument('--z1_start_b', type=int, default=10, help='Start of first z-range for ChanB (default: 10)')
     parser.add_argument('--z1_end_b', type=int, default=30, help='End of first z-range for ChanB (default: 30)')
-    parser.add_argument('--z2_start_b', type=int, default=40, help='Start of second z-range for ChanB (default: 40)')
-    parser.add_argument('--z2_end_b', type=int, default=55, help='End of second z-range for ChanB (default: 55)')
+    parser.add_argument('--z2_start_b', type=int, default=205, help='Start of second z-range for ChanB (default: 205)')
+    parser.add_argument('--z2_end_b', type=int, default=215, help='End of second z-range for ChanB (default: 215)')
     
     # Stimulation range with defaults
-    parser.add_argument('--z_stim_start', type=int, default=35, help='Start of stimulation range (default: 35)')
-    parser.add_argument('--z_stim_end', type=int, default=40, help='End of stimulation range (default: 40)')
+    parser.add_argument('--z_stim_start', type=int, default=202, help='Start of stimulation range (default: 202)')
+    parser.add_argument('--z_stim_end', type=int, default=205, help='End of stimulation range (default: 205)')
     
     args = parser.parse_args()
     
@@ -463,10 +469,10 @@ def main():
     print("\n=== Settings Information ===")
     print("Using default settings:", all([
         args.z1_start_a == 10, args.z1_end_a == 30,
-        args.z2_start_a == 40, args.z2_end_a == 70,
+        args.z2_start_a == 210, args.z2_end_a == 245,
         args.z1_start_b == 10, args.z1_end_b == 30,
-        args.z2_start_b == 40, args.z2_end_b == 55,
-        args.z_stim_start == 35, args.z_stim_end == 40
+        args.z2_start_b == 205, args.z2_end_b == 215,
+        args.z_stim_start == 202, args.z_stim_end == 205
     ]))
     print("\nChannel A Settings:")
     print(f"z1 range: {args.z1_start_a}-{args.z1_end_a}")
