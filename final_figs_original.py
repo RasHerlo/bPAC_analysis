@@ -137,6 +137,10 @@ def generate_example_figure(df, parent_directory, output_path):
     avg_image = create_average_image(stack)
     enhanced_image, vmin, vmax = enhance_contrast(avg_image)
     
+    # Take the top-right 225x225 pixels
+    height, width = enhanced_image.shape
+    top_right_corner = enhanced_image[0:225, width-225:width]
+    
     # Load ROI coordinates
     roi_path = os.path.join(stks_dir, 'ROIs', f"ROI#{entry['ROI#']}.npy")
     roi_coords = np.load(roi_path)
@@ -144,9 +148,9 @@ def generate_example_figure(df, parent_directory, output_path):
     # Calculate ROI dimensions and center
     center_x = np.mean(roi_coords[:, 0])
     center_y = np.mean(roi_coords[:, 1])
-    width = np.max(roi_coords[:, 0]) - np.min(roi_coords[:, 0])
-    height = np.max(roi_coords[:, 1]) - np.min(roi_coords[:, 1])
-    max_dim = max(width, height) * 1.2  # 20% larger
+    roi_width = np.max(roi_coords[:, 0]) - np.min(roi_coords[:, 0])
+    roi_height = np.max(roi_coords[:, 1]) - np.min(roi_coords[:, 1])
+    max_dim = max(roi_width, roi_height) * 1.2  # 20% larger
     
     # Create figure with custom layout
     fig = plt.figure(figsize=(12, 8))
@@ -154,28 +158,16 @@ def generate_example_figure(df, parent_directory, output_path):
     
     # 1. Average image with zoom-in
     ax1 = fig.add_subplot(gs[:, 0])
-    im = ax1.imshow(enhanced_image, cmap='viridis', vmin=vmin, vmax=vmax)
+    im = ax1.imshow(top_right_corner, cmap='viridis', vmin=vmin, vmax=vmax)
     
-    # Add zoom-in box
-    y_min = max(0, int(center_y - max_dim/2))
-    y_max = min(avg_image.shape[0], int(center_y + max_dim/2))
-    x_min = max(0, int(center_x - max_dim/2))
-    x_max = min(avg_image.shape[1], int(center_x + max_dim/2))
+    # Calculate ROI position in the new image section
+    roi_x_min = np.min(roi_coords[:, 0]) - (width-225)
+    roi_y_min = np.min(roi_coords[:, 1])
     
-    # Draw dotted rectangle for zoom area
-    rect = plt.Rectangle((x_min, y_min), x_max-x_min, y_max-y_min,
+    # Draw dotted rectangle for ROI
+    rect = plt.Rectangle((roi_x_min, roi_y_min), roi_width, roi_height,
                         fill=False, edgecolor='red', linestyle=':', linewidth=1)
     ax1.add_patch(rect)
-    
-    # Add zoom-in insert
-    ax_inset = ax1.inset_axes([0.6, 0.1, 0.35, 0.35])
-    ax_inset.imshow(enhanced_image[y_min:y_max, x_min:x_max], cmap='viridis', vmin=vmin, vmax=vmax)
-    ax_inset.set_xticks([])
-    ax_inset.set_yticks([])
-    ax_inset.spines['bottom'].set_color('black')
-    ax_inset.spines['top'].set_color('black')
-    ax_inset.spines['left'].set_color('black')
-    ax_inset.spines['right'].set_color('black')
     
     ax1.set_title('Example of ROI')
     ax1.axis('off')
