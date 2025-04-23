@@ -1,3 +1,4 @@
 __pycache__/
 *.pyc
-bPAC_Analysis_venv/ 
+bPAC_Analysis_venv/
+bPAC_detection_venv/ 
