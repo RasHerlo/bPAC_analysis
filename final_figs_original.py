@@ -117,12 +117,18 @@ def generate_example_figure(df, parent_directory, output_path):
         parent_directory (str): Path to the parent directory
         output_path (str): Path to save the figure
     """
-    # Find the specific entry
-    entry = df[
-        (df['MOUSE'] == 'MLV') & 
-        (df['EXP'] == 'LEDx15pls_MV_protocol') & 
-        (df['ROI#'] == 4)
-    ].iloc[0]
+    # Find the four specific entries to average
+    entries = df[
+        ((df['MOUSE'] == 'MLV') & 
+         (df['EXP'] == 'LEDx15pls_MV_protocol') & 
+         (df['ROI#'].isin([4, 5]))) |
+        ((df['MOUSE'] == 'MLV') & 
+         (df['EXP'] == 'LEDx15pls_MV_protocol_004') & 
+         (df['ROI#'].isin([4, 5])))
+    ]
+    
+    # Use the first entry for the image and ROI coordinates
+    entry = entries.iloc[0]
     
     # Load and process the stack
     stks_dir = os.path.join(parent_directory, entry['MOUSE'], entry['EXP'], 'STKS')
@@ -179,11 +185,18 @@ def generate_example_figure(df, parent_directory, output_path):
     frames = np.arange(len(entry['ChanB_Z_trc']))
     time = frames * 2.2 - 33  # Convert frames to seconds and shift so frame 15 is at 0
     
-    # Create copies of the traces and set frames 15-17 to NaN
-    gcamp_trace = entry['ChanB_Z_trc'].copy()
-    gcamp_trace[15:18] = np.nan
+    # Get all GCaMP6s traces and set frames 15-17 to NaN
+    gcamp_traces = []
+    for _, row in entries.iterrows():
+        trace = row['ChanB_Z_trc'].copy()
+        trace[15:18] = np.nan
+        gcamp_traces.append(trace)
     
-    y_smooth = smooth_trace(gcamp_trace, is_gcamp=True)  # Use stronger smoothing for GCaMP
+    # Calculate average trace
+    gcamp_traces = np.array(gcamp_traces)
+    gcamp_avg = np.nanmean(gcamp_traces, axis=0)
+    
+    y_smooth = smooth_trace(gcamp_avg, is_gcamp=True)  # Use stronger smoothing for GCaMP
     
     # Add baseline at y=0
     ax2.plot([time[0], time[-1]], [0, 0], 'k--', linewidth=0.5)
@@ -191,9 +204,10 @@ def generate_example_figure(df, parent_directory, output_path):
     # Add vertical cyan line from frame 15 to 16
     stim_start = 0  # Now at 0 seconds
     stim_end = 2.2  # 1 frame later
-    ax2.fill_betweenx([0, 35], stim_start, stim_end, color='cyan', alpha=0.3)
+    gcamp_max = np.nanmax(gcamp_avg)  # Get maximum value for cyan box height
+    ax2.fill_betweenx([0, gcamp_max], stim_start, stim_end, color='cyan', alpha=0.3)
     
-    ax2.scatter(time, gcamp_trace, color='green', s=10, alpha=0.5)
+    ax2.scatter(time, gcamp_avg, color='green', s=10, alpha=0.5)
     ax2.plot(time, y_smooth, 'k-', linewidth=1)
     ax2.set_title('GCaMP6s')
     ax2.set_xlabel('Time (s)')
@@ -211,22 +225,28 @@ def generate_example_figure(df, parent_directory, output_path):
     
     # 3. PinkFlamindo trace (bottom right)
     ax3 = fig.add_subplot(gs[1, 1])
-    frames = np.arange(len(entry['ChanA_Z_trc']))
-    time = frames * 2.2 - 33  # Convert frames to seconds and shift so frame 15 is at 0
     
-    # Create copies of the traces and set frames 15-17 to NaN
-    pinkflamindo_trace = entry['ChanA_Z_trc'].copy()
-    pinkflamindo_trace[15:18] = np.nan
+    # Get all PinkFlamindo traces and set frames 15-17 to NaN
+    pinkflamindo_traces = []
+    for _, row in entries.iterrows():
+        trace = row['ChanA_Z_trc'].copy()
+        trace[15:18] = np.nan
+        pinkflamindo_traces.append(trace)
     
-    y_smooth = smooth_trace(pinkflamindo_trace, is_gcamp=False)  # Use original smoothing for PinkFlamindo
+    # Calculate average trace
+    pinkflamindo_traces = np.array(pinkflamindo_traces)
+    pinkflamindo_avg = np.nanmean(pinkflamindo_traces, axis=0)
+    
+    y_smooth = smooth_trace(pinkflamindo_avg, is_gcamp=False)  # Use original smoothing for PinkFlamindo
     
     # Add baseline at y=0
     ax3.plot([time[0], time[-1]], [0, 0], 'k--', linewidth=0.5)
     
     # Add vertical cyan line from frame 15 to 16
-    ax3.fill_betweenx([0, 4], stim_start, stim_end, color='cyan', alpha=0.3)
+    pinkflamindo_max = np.nanmax(pinkflamindo_avg)  # Get maximum value for cyan box height
+    ax3.fill_betweenx([0, pinkflamindo_max], stim_start, stim_end, color='cyan', alpha=0.3)
     
-    ax3.scatter(time, pinkflamindo_trace, color='red', s=10, alpha=0.5)
+    ax3.scatter(time, pinkflamindo_avg, color='red', s=10, alpha=0.5)
     ax3.plot(time, y_smooth, 'k-', linewidth=1)
     ax3.set_title('PinkFlamindo')
     ax3.set_xlabel('Time (s)')
