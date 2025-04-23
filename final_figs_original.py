@@ -269,13 +269,20 @@ def generate_example_figure(df, parent_directory, output_path):
 
 def generate_mean_traces_figure(df, output_path):
     """
-    Generate a figure showing mean traces with standard deviation for both channels.
+    Generate a figure showing mean traces with standard error of the mean for both channels.
     """
     # Group by mouse and experiment
     grouped = df.groupby(['MOUSE', 'EXP'])
     
-    # Create figure
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+    # Create figure with 4 subplots
+    fig = plt.figure(figsize=(15, 10))  # Increased height from 8 to 10
+    gs = fig.add_gridspec(2, 2, width_ratios=[2, 1], height_ratios=[1, 1], hspace=0.3)  # Increased hspace from 0.05 to 0.3
+    
+    # Create axes
+    ax1 = fig.add_subplot(gs[0, 0])  # GCaMP6s trace
+    ax2 = fig.add_subplot(gs[1, 0])  # PinkFlamindo trace
+    ax3 = fig.add_subplot(gs[0, 1])  # GCaMP6s bar plot
+    ax4 = fig.add_subplot(gs[1, 1])  # PinkFlamindo bar plot
     
     # Process GCaMP6s traces
     gcamp_traces = []
@@ -287,10 +294,12 @@ def generate_mean_traces_figure(df, output_path):
             trace_copy[15:18] = np.nan
             gcamp_traces.append(trace_copy)
     
-    # Calculate mean and std
+    # Calculate mean and sem
     gcamp_traces = np.array(gcamp_traces)
+    n_gcamp = len(gcamp_traces)  # number of traces
     gcamp_mean = np.nanmean(gcamp_traces, axis=0)
     gcamp_std = np.nanstd(gcamp_traces, axis=0)
+    gcamp_sem = gcamp_std / np.sqrt(n_gcamp)
     
     # Process PinkFlamindo traces
     pinkflamindo_traces = []
@@ -302,29 +311,29 @@ def generate_mean_traces_figure(df, output_path):
             trace_copy[15:18] = np.nan
             pinkflamindo_traces.append(trace_copy)
     
-    # Calculate mean and std
+    # Calculate mean and sem
     pinkflamindo_traces = np.array(pinkflamindo_traces)
+    n_pinkflamindo = len(pinkflamindo_traces)  # number of traces
     pinkflamindo_mean = np.nanmean(pinkflamindo_traces, axis=0)
     pinkflamindo_std = np.nanstd(pinkflamindo_traces, axis=0)
+    pinkflamindo_sem = pinkflamindo_std / np.sqrt(n_pinkflamindo)
     
     # Create time array
     frames = np.arange(len(gcamp_mean))
     time = frames * 2.2 - 33  # Convert frames to seconds and shift so frame 15 is at 0
     
-    # Plot GCaMP6s
-    # Add baseline at y=0
+    # Plot GCaMP6s trace
     ax1.plot([time[0], time[-1]], [0, 0], 'k--', linewidth=0.5)
-    ax1.plot(time, gcamp_mean, 'g-', label='GCaMP6s')
-    ax1.fill_between(time, gcamp_mean - gcamp_std, gcamp_mean + gcamp_std, color='g', alpha=0.2)
+    ax1.plot(time, gcamp_mean, 'g-', label='mean ± s.e.m.')
+    ax1.fill_between(time, gcamp_mean - gcamp_sem, gcamp_mean + gcamp_sem, color='g', alpha=0.2)
     ax1.set_ylabel('Z-scored values')
     ax1.set_title('GCaMP6s Mean Trace')
     ax1.legend()
     
-    # Plot PinkFlamindo
-    # Add baseline at y=0
+    # Plot PinkFlamindo trace
     ax2.plot([time[0], time[-1]], [0, 0], 'k--', linewidth=0.5)
-    ax2.plot(time, pinkflamindo_mean, 'r-', label='PinkFlamindo')
-    ax2.fill_between(time, pinkflamindo_mean - pinkflamindo_std, pinkflamindo_mean + pinkflamindo_std, color='r', alpha=0.2)
+    ax2.plot(time, pinkflamindo_mean, 'r-', label='mean ± s.e.m.')
+    ax2.fill_between(time, pinkflamindo_mean - pinkflamindo_sem, pinkflamindo_mean + pinkflamindo_sem, color='r', alpha=0.2)
     ax2.set_xlabel('Time (s)')
     ax2.set_ylabel('Z-scored values')
     ax2.set_title('PinkFlamindo Mean Trace')
@@ -333,8 +342,13 @@ def generate_mean_traces_figure(df, output_path):
     # Add vertical cyan line for stimulation
     stim_start = 0  # Now at 0 seconds
     stim_end = 2.2  # 1 frame later
-    ax1.fill_betweenx([-1, 35], stim_start, stim_end, color='cyan', alpha=0.3)
-    ax2.fill_betweenx([-1, 4], stim_start, stim_end, color='cyan', alpha=0.3)
+    
+    # Calculate max values including SEM
+    gcamp_max = np.nanmax(gcamp_mean + gcamp_sem)
+    pinkflamindo_max = np.nanmax(pinkflamindo_mean + pinkflamindo_sem)
+    
+    ax1.fill_betweenx([-1, gcamp_max], stim_start, stim_end, color='cyan', alpha=0.3)
+    ax2.fill_betweenx([-0.5, pinkflamindo_max], stim_start, stim_end, color='cyan', alpha=0.3)
     
     # Set x-axis limits and ticks
     ax2.set_xlim([-30, 150])
@@ -343,6 +357,37 @@ def generate_mean_traces_figure(df, output_path):
     
     # Remove top and right spines
     for ax in [ax1, ax2]:
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+    
+    # Create bar plots for specific timepoints
+    timepoints = [-10, 8, 40, 80]
+    timepoint_indices = [np.argmin(np.abs(time - tp)) for tp in timepoints]
+    
+    # GCaMP6s bar plot
+    gcamp_values = gcamp_mean[timepoint_indices]
+    gcamp_errors = gcamp_sem[timepoint_indices]
+    ax3.bar(range(len(timepoints)), gcamp_values, color='g', alpha=0.7)
+    ax3.errorbar(range(len(timepoints)), gcamp_values, yerr=gcamp_errors, 
+                fmt='none', color='k', capsize=5)
+    ax3.set_xticks(range(len(timepoints)))
+    ax3.set_xticklabels([f'{tp}s' for tp in timepoints])
+    ax3.set_title('GCaMP6s Timepoints')
+    ax3.set_ylabel('Z-scored values')
+    
+    # PinkFlamindo bar plot
+    pinkflamindo_values = pinkflamindo_mean[timepoint_indices]
+    pinkflamindo_errors = pinkflamindo_sem[timepoint_indices]
+    ax4.bar(range(len(timepoints)), pinkflamindo_values, color='r', alpha=0.7)
+    ax4.errorbar(range(len(timepoints)), pinkflamindo_values, yerr=pinkflamindo_errors, 
+                fmt='none', color='k', capsize=5)
+    ax4.set_xticks(range(len(timepoints)))
+    ax4.set_xticklabels([f'{tp}s' for tp in timepoints])
+    ax4.set_title('PinkFlamindo Timepoints')
+    ax4.set_ylabel('Z-scored values')
+    
+    # Remove top and right spines from bar plots
+    for ax in [ax3, ax4]:
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
     
