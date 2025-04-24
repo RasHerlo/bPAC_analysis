@@ -42,7 +42,9 @@ The typical workflow for analyzing bPAC data is as follows:
 
 ## Default Settings
 
-**Note**: Default settings may vary depending on the experiment type and imaging conditions. The following are example settings that should be adjusted based on your specific experiment:
+**Note**: Default settings may vary depending on the experiment type and imaging conditions. The following are example settings that should be adjusted based on your specific experiment.
+
+NB: This set of settings is called 'Setting Set 1' and is used for experiments with APs, bPAC, APs:
 
 ### bPAC_detect_and_trace.py
 
@@ -55,6 +57,19 @@ The typical workflow for analyzing bPAC data is as follows:
   - z2 range: 205-215 (response)
 
 - **Stimulation range**: 202-205
+
+Another set of settings, called 'Setting Set 2' is used for spontaneous bPAC-experiments:
+
+- **Channel A**:
+  - z1 range: 10-30 (baseline)
+  - z2 range: 45-85 (response)
+
+- **Channel B**:
+  - z1 range: 10-30 (baseline)
+  - z2 range: 45-55 (response)
+
+- **Stimulation range**: 35-45
+
 
 ### Usage
 
@@ -69,7 +84,7 @@ python pdf_overview.py "path/to/directory"
 python final_figs.py "path/to/directory"
 ```
 
-Or with custom settings (example for bPAC_detect_and_trace.py):
+Or with custom settings (here shown with 'Setting Set 1'):
 ```bash
 python bPAC_detect_and_trace.py "path/to/directory" --z1_start_a 10 --z1_end_a 30 --z2_start_a 205 --z2_end_a 245 --z1_start_b 10 --z1_end_b 30 --z2_start_b 205 --z2_end_b 215 --z_stim_start 202 --z_stim_end 205
 ```

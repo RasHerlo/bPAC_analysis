@@ -208,6 +208,10 @@ def plot_rois_on_image(avg_image, rois, stackA, stackB, z_stim_start, z_stim_end
         ax_roi.imshow(roi_cutout, cmap='viridis')
         ax_roi.set_title(f'ROI: {roi_name}')
         ax_roi.set_aspect('equal')
+        # Remove ticks and ticklabels from zoom-in image
+        ax_roi.set_xticks([])
+        ax_roi.set_yticks([])
+        ax_roi.set_ylabel('')  # Remove y-axis label
         
         # Add thin red ROI lines to zoom window
         roi_coords_closed = np.vstack([roi_coords, roi_coords[0]])
@@ -231,9 +235,12 @@ def plot_rois_on_image(avg_image, rois, stackA, stackB, z_stim_start, z_stim_end
         lineB, = ax_trace.plot(norm_trace_chanB, 'g-', label=f'{roi_name} (ChanB)')
         plot_objects[roi_name] = {'A': lineA, 'B': lineB}
         
-        ax_trace.legend()
         ax_trace.set_title(f'Normalized Traces: {roi_name}')
-        ax_trace.set_ylabel('Normalized Intensity')
+        # Remove y-axis label
+        ax_trace.set_ylabel('')
+        # Remove x-ticks and ticklabels from trace subplot
+        ax_trace.set_xticks([])
+        ax_trace.set_xticklabels([])
         
         # Add stimulation range indicator
         stim_rect = plt.Rectangle((z_stim_start, -0.25), 
