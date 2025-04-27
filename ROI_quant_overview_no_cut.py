@@ -126,9 +126,9 @@ def visualize_dataframe(df):
     # Create a copy of the DataFrame for display
     display_df = df.copy()
     
-    # Convert trace columns to compact format
+    # Convert trace and dF/F columns to compact format
     for col in display_df.columns:
-        if 'trc' in col.lower():  # If column contains traces
+        if 'trc' in col.lower() or 'dff' in col.lower():  # If column contains traces or dF/F values
             display_df[col] = display_df[col].apply(lambda x: f"Trace [length: {len(x)}]" if isinstance(x, np.ndarray) else str(x))
     
     # Convert all values to strings and right-align numbers
@@ -298,6 +298,13 @@ def add_trace_columns(df, parent_directory):
     df['ChanB_norm_trc'] = None
     df['ChanA_Z_trc'] = None
     df['ChanB_Z_trc'] = None
+    df['ChanA_bg'] = None
+    df['ChanB_bg'] = None
+    df['ChanA_dFF'] = None
+    df['ChanB_dFF'] = None
+    
+    # Dictionary to store background values for each tif-stack
+    background_values = {}
     
     # Process each row
     for idx, row in df.iterrows():
@@ -312,6 +319,28 @@ def add_trace_columns(df, parent_directory):
         # Store raw traces
         df.at[idx, 'ChanA_raw_trc'] = chan_a_trace
         df.at[idx, 'ChanB_raw_trc'] = chan_b_trace
+        
+        # Calculate background values if not already done for this stack
+        chan_a_stack_path = os.path.join(exp_dir, 'ChanA_stk.tif')
+        chan_b_stack_path = os.path.join(exp_dir, 'ChanB_stk.tif')
+        
+        if chan_a_stack_path not in background_values:
+            # Load the tif-stacks
+            chan_a_stack = io.imread(chan_a_stack_path)
+            chan_b_stack = io.imread(chan_b_stack_path)
+            # Calculate background as minimum value in the stack
+            background_values[chan_a_stack_path] = np.min(chan_a_stack)
+            background_values[chan_b_stack_path] = np.min(chan_b_stack)
+        
+        # Store background values
+        df.at[idx, 'ChanA_bg'] = background_values[chan_a_stack_path]
+        df.at[idx, 'ChanB_bg'] = background_values[chan_b_stack_path]
+        
+        # Calculate dF/F
+        df.at[idx, 'ChanA_dFF'] = (chan_a_trace - background_values[chan_a_stack_path]) / \
+                                 (np.median(chan_a_trace) - background_values[chan_a_stack_path])
+        df.at[idx, 'ChanB_dFF'] = (chan_b_trace - background_values[chan_b_stack_path]) / \
+                                 (np.median(chan_b_trace) - background_values[chan_b_stack_path])
         
         # Apply compensation to Channel A
         compensation_factor = 0.15
@@ -365,7 +394,7 @@ def save_dataframe(df, parent_directory):
     # Also save a readable Excel version for reference (without traces)
     excel_df = df.copy()
     for col in excel_df.columns:
-        if 'trc' in col.lower():  # If column contains traces
+        if 'trc' in col.lower() or 'dff' in col.lower():  # If column contains traces or dF/F values
             excel_df[col] = excel_df[col].apply(lambda x: f"Trace [length: {len(x)}]" if isinstance(x, np.ndarray) else str(x))
     excel_path = os.path.join(parent_directory, 'ROI_quant_overview.xlsx')
     excel_df.to_excel(excel_path, index=False)
