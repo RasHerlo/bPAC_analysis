@@ -40,7 +40,8 @@ def find_pickle_file(directory):
 def extract_max_values(df):
     """
     Extract maximum values from ChanA_dFF and ChanB_dFF columns.
-    For cAMP (ChanA_dFF), only look between frames 20-80.
+    For cAMP (ChanA_dFF), only look between frames 15-60.
+    Excludes ROI#8 from calculations.
     
     Args:
         df (pd.DataFrame): DataFrame containing ROI data
@@ -48,9 +49,12 @@ def extract_max_values(df):
     Returns:
         tuple: Arrays of cAMP and Ca maximum values
     """
+    # Filter out ROI#8
+    df_filtered = df[df['ROI#'] != 8]
+    
     # Extract maximum values from each row in ChanA_dFF and ChanB_dFF
-    cAMP_values = df['ChanA_dFF'].apply(lambda x: np.max(x[20:80]) if isinstance(x, (list, np.ndarray)) else x)
-    Ca_values = df['ChanB_dFF'].apply(lambda x: np.max(x) if isinstance(x, (list, np.ndarray)) else x)
+    cAMP_values = df_filtered['ChanA_dFF'].apply(lambda x: np.max(x[15:60]) if isinstance(x, (list, np.ndarray)) else x)
+    Ca_values = df_filtered['ChanB_dFF'].apply(lambda x: np.max(x) if isinstance(x, (list, np.ndarray)) else x)
     
     return cAMP_values, Ca_values
 
@@ -101,11 +105,15 @@ def plot_correlation(cAMP_values, Ca_values, output_dir):
 def plot_pairwise_traces(df, output_dir):
     """
     Create a scrollable figure showing pairwise traces of cAMP and Ca signals.
+    Excludes ROI#8 from visualization.
     
     Args:
         df (pd.DataFrame): DataFrame containing ROI data
         output_dir (str): Directory where the plot should be saved
     """
+    # Filter out ROI#8
+    df_filtered = df[df['ROI#'] != 8]
+    
     # Create a Tkinter window
     root = tk.Tk()
     root.title("cAMP and Ca Traces")
@@ -128,7 +136,7 @@ def plot_pairwise_traces(df, output_dir):
     canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
     
     # Calculate the total height needed for all plots
-    n_rows = len(df)
+    n_rows = len(df_filtered)
     plot_height = 2.5  # inches per plot
     total_height = n_rows * plot_height
     
@@ -141,13 +149,13 @@ def plot_pairwise_traces(df, output_dir):
         axes = axes.reshape(1, -1)
     
     # Plot each pair of traces
-    for idx, (_, row) in enumerate(df.iterrows()):
+    for idx, (_, row) in enumerate(df_filtered.iterrows()):
         # Get the traces
         cAMP_trace = row['ChanA_dFF']
         Ca_trace = row['ChanB_dFF']
         
-        # Find maximum values and their indices (for cAMP, only between frames 20-80)
-        cAMP_max_idx = np.argmax(cAMP_trace[20:80]) + 20  # Add 20 to get correct index
+        # Find maximum values and their indices (for cAMP, only between frames 15-60)
+        cAMP_max_idx = np.argmax(cAMP_trace[15:60]) + 15  # Add 15 to get correct index
         Ca_max_idx = np.argmax(Ca_trace)
         
         # Plot cAMP trace
@@ -155,16 +163,16 @@ def plot_pairwise_traces(df, output_dir):
         axes[idx, 0].scatter(cAMP_max_idx, cAMP_trace[cAMP_max_idx], color='red', s=50)
         axes[idx, 0].set_title(f'ROI {row["ROI#"]} - cAMP')
         axes[idx, 0].grid(True, alpha=0.3)
-        # Add gray box for frames 20-80
-        axes[idx, 0].axvspan(20, 80, color='gray', alpha=0.2)
+        # Add gray box for frames 15-60
+        axes[idx, 0].axvspan(15, 60, color='gray', alpha=0.2)
         
         # Plot Ca trace
         axes[idx, 1].plot(Ca_trace, color='green')
         axes[idx, 1].scatter(Ca_max_idx, Ca_trace[Ca_max_idx], color='red', s=50)
         axes[idx, 1].set_title(f'ROI {row["ROI#"]} - Ca')
         axes[idx, 1].grid(True, alpha=0.3)
-        # Add gray box for frames 20-80
-        axes[idx, 1].axvspan(20, 80, color='gray', alpha=0.2)
+        # Add gray box for frames 15-60
+        axes[idx, 1].axvspan(15, 60, color='gray', alpha=0.2)
     
     # Add x-axis labels to the bottom row only
     for ax in axes[-1]:

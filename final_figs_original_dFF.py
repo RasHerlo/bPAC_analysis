@@ -12,7 +12,7 @@ import os
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from tifffile import imread
+from tifffile import imread, imwrite
 from scipy.signal import savgol_filter
 from scipy.ndimage import gaussian_filter1d
 from statsmodels.nonparametric.smoothers_lowess import lowess
@@ -108,7 +108,7 @@ def smooth_trace(trace, is_gcamp=False):
     
     return result
 
-def generate_example_figure(df, parent_directory, output_path):
+def generate_example_figure(df, parent_directory, output_path, results_dir):
     """
     Generate the example figure showing ROI and traces.
     
@@ -116,6 +116,10 @@ def generate_example_figure(df, parent_directory, output_path):
         df (pandas.DataFrame): DataFrame containing ROI data
         parent_directory (str): Path to the parent directory
         output_path (str): Path to save the figure
+        results_dir (str): Path to the results directory
+        
+    Returns:
+        dict: Dictionary containing the data for export
     """
     # Find the four specific entries to average
     entries = df[
@@ -140,6 +144,9 @@ def generate_example_figure(df, parent_directory, output_path):
     # Take the top-right 225x225 pixels
     height, width = enhanced_image.shape
     top_right_corner = enhanced_image[0:225, width-225:width]
+    
+    # Save the image cutout
+    imwrite(os.path.join(results_dir, 'example_roi.tif'), top_right_corner.astype(np.float32))
     
     # Load ROI coordinates
     roi_path = os.path.join(stks_dir, 'ROIs', f"ROI#{entry['ROI#']}.npy")
@@ -252,169 +259,190 @@ def generate_example_figure(df, parent_directory, output_path):
     ax3.spines['top'].set_visible(False)
     ax3.spines['right'].set_visible(False)
     
-    # Adjust subplot positions to align with image edges and prevent overlap
-    pos1 = ax1.get_position()
-    total_height = pos1.height
-    subplot_height = total_height * 0.4  # Make each subplot 40% of the total height
-    
-    # Set new positions
-    ax2.set_position([pos1.x1 + 0.05, pos1.y1 - subplot_height, pos1.width, subplot_height])
-    ax3.set_position([pos1.x1 + 0.05, pos1.y0, pos1.width, subplot_height])
-    
+    # Save the figure
     plt.tight_layout()
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close()
+    
+    # Return the data for export
+    return {
+        'time': time,
+        'gcamp': gcamp_avg,
+        'pinkflamindo': pinkflamindo_avg
+    }
 
 def generate_mean_traces_figure(df, output_path):
     """
-    Generate a figure showing mean traces with standard error of the mean for both channels.
+    Generate the mean traces figure showing average GCaMP6s and PinkFlamindo traces.
+    
+    Args:
+        df (pandas.DataFrame): DataFrame containing ROI data
+        output_path (str): Path to save the figure
+        
+    Returns:
+        dict: Dictionary containing the data for export
     """
-    # Group by mouse and experiment
-    grouped = df.groupby(['MOUSE', 'EXP'])
+    # Filter for specific mouse and experiment
+    filtered_df = df[
+        (df['MOUSE'] == 'MLV') & 
+        (df['EXP'].str.contains('LEDx15pls_MV_protocol'))
+    ]
     
-    # Create figure with 4 subplots
-    fig = plt.figure(figsize=(15, 10))  # Increased height from 8 to 10
-    gs = fig.add_gridspec(2, 2, width_ratios=[2, 1], height_ratios=[1, 1], hspace=0.3)  # Increased hspace from 0.05 to 0.3
-    
-    # Create axes
-    ax1 = fig.add_subplot(gs[0, 0])  # GCaMP6s trace
-    ax2 = fig.add_subplot(gs[1, 0])  # PinkFlamindo trace
-    ax3 = fig.add_subplot(gs[0, 1])  # GCaMP6s bar plot
-    ax4 = fig.add_subplot(gs[1, 1])  # PinkFlamindo bar plot
-    
-    # Process GCaMP6s traces
+    # Get all GCaMP6s traces
     gcamp_traces = []
-    for _, group in grouped:
-        traces = group['ChanB_dFF'].tolist()
-        # Set frames 15-17 to NaN for each trace
-        for trace in traces:
-            trace_copy = trace.copy()
-            trace_copy[15:18] = np.nan
-            gcamp_traces.append(trace_copy)
+    for _, row in filtered_df.iterrows():
+        trace = row['ChanB_dFF'].copy()
+        trace[15:18] = np.nan  # Set frames 15-17 to NaN
+        gcamp_traces.append(trace)
     
-    # Calculate mean and sem
-    gcamp_traces = np.array(gcamp_traces)
-    n_gcamp = len(gcamp_traces)  # number of traces
-    gcamp_mean = np.nanmean(gcamp_traces, axis=0)
-    gcamp_std = np.nanstd(gcamp_traces, axis=0)
-    gcamp_sem = gcamp_std / np.sqrt(n_gcamp)
-    
-    # Process PinkFlamindo traces
+    # Get all PinkFlamindo traces
     pinkflamindo_traces = []
-    for _, group in grouped:
-        traces = group['ChanA_dFF'].tolist()
-        # Set frames 15-17 to NaN for each trace
-        for trace in traces:
-            trace_copy = trace.copy()
-            trace_copy[15:18] = np.nan
-            pinkflamindo_traces.append(trace_copy)
+    for _, row in filtered_df.iterrows():
+        trace = row['ChanA_dFF'].copy()
+        trace[15:18] = np.nan  # Set frames 15-17 to NaN
+        pinkflamindo_traces.append(trace)
     
-    # Calculate mean and sem
+    # Convert to numpy arrays
+    gcamp_traces = np.array(gcamp_traces)
     pinkflamindo_traces = np.array(pinkflamindo_traces)
-    n_pinkflamindo = len(pinkflamindo_traces)  # number of traces
+    
+    # Calculate mean and SEM
+    gcamp_mean = np.nanmean(gcamp_traces, axis=0)
+    gcamp_sem = np.nanstd(gcamp_traces, axis=0) / np.sqrt(np.sum(~np.isnan(gcamp_traces), axis=0))
+    
     pinkflamindo_mean = np.nanmean(pinkflamindo_traces, axis=0)
-    pinkflamindo_std = np.nanstd(pinkflamindo_traces, axis=0)
-    pinkflamindo_sem = pinkflamindo_std / np.sqrt(n_pinkflamindo)
+    pinkflamindo_sem = np.nanstd(pinkflamindo_traces, axis=0) / np.sqrt(np.sum(~np.isnan(pinkflamindo_traces), axis=0))
     
     # Create time array
     frames = np.arange(len(gcamp_mean))
     time = frames * 2.2 - 33  # Convert frames to seconds and shift so frame 15 is at 0
     
-    # Plot GCaMP6s trace
-    ax1.plot([time[0], time[-1]], [1, 1], 'k--', linewidth=0.5)
-    ax1.plot(time, gcamp_mean, 'g-', label='mean ± s.e.m.')
-    ax1.fill_between(time, gcamp_mean - gcamp_sem, gcamp_mean + gcamp_sem, color='g', alpha=0.2)
-    ax1.set_ylabel('dF/F values')
-    ax1.set_title('GCaMP6s Mean Trace')
-    ax1.legend()
+    # Create figure
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 8), sharex=True)
     
-    # Plot PinkFlamindo trace
-    ax2.plot([time[0], time[-1]], [1, 1], 'k--', linewidth=0.5)
-    ax2.plot(time, pinkflamindo_mean, 'r-', label='mean ± s.e.m.')
+    # Plot GCaMP6s
+    ax1.plot(time, gcamp_mean, 'g-', linewidth=1)
+    ax1.fill_between(time, gcamp_mean - gcamp_sem, gcamp_mean + gcamp_sem, color='g', alpha=0.2)
+    ax1.set_title('GCaMP6s')
+    ax1.set_ylabel('dF/F values')
+    ax1.set_xlim([-30, 150])
+    ax1.set_xticks([-30, 0, 30, 60, 90, 120, 150])
+    ax1.set_xticklabels(['-30', '0', '30', '60', '90', '120', '150'])
+    
+    # Plot PinkFlamindo
+    ax2.plot(time, pinkflamindo_mean, 'r-', linewidth=1)
     ax2.fill_between(time, pinkflamindo_mean - pinkflamindo_sem, pinkflamindo_mean + pinkflamindo_sem, color='r', alpha=0.2)
+    ax2.set_title('PinkFlamindo')
     ax2.set_xlabel('Time (s)')
     ax2.set_ylabel('dF/F values')
-    ax2.set_title('PinkFlamindo Mean Trace')
-    ax2.legend()
     
-    # Add vertical cyan line for stimulation
+    # Add vertical cyan line from frame 15 to 16
     stim_start = 0  # Now at 0 seconds
     stim_end = 2.2  # 1 frame later
     
-    # Calculate max values including SEM
-    gcamp_max = np.nanmax(gcamp_mean + gcamp_sem)
-    pinkflamindo_max = np.nanmax(pinkflamindo_mean + pinkflamindo_sem)
-    
-    ax1.fill_betweenx([1, gcamp_max], stim_start, stim_end, color='cyan', alpha=0.3)
-    ax2.fill_betweenx([1, pinkflamindo_max], stim_start, stim_end, color='cyan', alpha=0.3)
-    
-    # Set x-axis limits and ticks
-    ax2.set_xlim([-30, 150])
-    ax2.set_xticks([-30, 0, 30, 60, 90, 120, 150])
-    ax2.set_xticklabels(['-30', '0', '30', '60', '90', '120', '150'])
-    
-    # Remove top and right spines
+    # Add cyan box to both plots
     for ax in [ax1, ax2]:
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
+        y_min, y_max = ax.get_ylim()
+        ax.fill_betweenx([y_min, y_max], stim_start, stim_end, color='cyan', alpha=0.3)
+        ax.set_ylim([y_min, y_max])
     
-    # Create bar plots for specific timepoints
-    timepoints = [-10, 8, 40, 80]
-    timepoint_indices = [np.argmin(np.abs(time - tp)) for tp in timepoints]
-    
-    # GCaMP6s bar plot
-    gcamp_values = gcamp_mean[timepoint_indices]
-    gcamp_errors = gcamp_sem[timepoint_indices]
-    ax3.bar(range(len(timepoints)), gcamp_values, color='g', alpha=0.7)
-    ax3.errorbar(range(len(timepoints)), gcamp_values, yerr=gcamp_errors, 
-                fmt='none', color='k', capsize=5)
-    ax3.set_xticks(range(len(timepoints)))
-    ax3.set_xticklabels([f'{tp}s' for tp in timepoints])
-    ax3.set_title('GCaMP6s Timepoints')
-    ax3.set_ylabel('dF/F values')
-    ax3.set_ylim(bottom=1)  # Set y-axis to start from 1
-    
-    # PinkFlamindo bar plot
-    pinkflamindo_values = pinkflamindo_mean[timepoint_indices]
-    pinkflamindo_errors = pinkflamindo_sem[timepoint_indices]
-    ax4.bar(range(len(timepoints)), pinkflamindo_values, color='r', alpha=0.7)
-    ax4.errorbar(range(len(timepoints)), pinkflamindo_values, yerr=pinkflamindo_errors, 
-                fmt='none', color='k', capsize=5)
-    ax4.set_xticks(range(len(timepoints)))
-    ax4.set_xticklabels([f'{tp}s' for tp in timepoints])
-    ax4.set_title('PinkFlamindo Timepoints')
-    ax4.set_ylabel('dF/F values')
-    ax4.set_ylim(bottom=1)  # Set y-axis to start from 1
-    
-    # Remove top and right spines from bar plots
-    for ax in [ax3, ax4]:
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-    
+    # Save the figure
     plt.tight_layout()
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close()
+    
+    # Return the data for export
+    return {
+        'time': time,
+        'gcamp_mean': gcamp_mean,
+        'gcamp_sem': gcamp_sem,
+        'pinkflamindo_mean': pinkflamindo_mean,
+        'pinkflamindo_sem': pinkflamindo_sem
+    }
+
+def create_results_directory(pickle_dir):
+    """
+    Create a results directory in the same location as the pickle file.
+    
+    Args:
+        pickle_dir (str): Directory containing the pickle file
+        
+    Returns:
+        str: Path to the results directory
+    """
+    results_dir = os.path.join(pickle_dir, 'results')
+    os.makedirs(results_dir, exist_ok=True)
+    return results_dir
+
+def export_data_to_excel(example_data, mean_traces_data, output_path):
+    """
+    Export the data to an Excel file with two sheets.
+    
+    Args:
+        example_data (dict): Dictionary containing example figure data
+        mean_traces_data (dict): Dictionary containing mean traces data
+        output_path (str): Path to save the Excel file
+    """
+    with pd.ExcelWriter(output_path) as writer:
+        # Example figure data
+        example_df = pd.DataFrame({
+            'Time (s)': example_data['time'],
+            'GCaMP6s': example_data['gcamp'],
+            'PinkFlamindo': example_data['pinkflamindo']
+        })
+        example_df.to_excel(writer, sheet_name='example_figure', index=False)
+        
+        # Mean traces data
+        mean_traces_df = pd.DataFrame({
+            'Time (s)': mean_traces_data['time'],
+            'Mean_GCaMP6s': mean_traces_data['gcamp_mean'],
+            'SEM_GCaMP6s': mean_traces_data['gcamp_sem'],
+            'Mean_PinkFlamindo': mean_traces_data['pinkflamindo_mean'],
+            'SEM_PinkFlamindo': mean_traces_data['pinkflamindo_sem']
+        })
+        mean_traces_df.to_excel(writer, sheet_name='mean_traces_figure', index=False)
 
 def main(parent_directory):
     """
-    Main function to generate the final figures.
+    Main function to generate all figures and export data.
     
     Args:
-        parent_directory (str): Path to the parent directory
+        parent_directory (str): Path to the parent directory containing the pickle file
     """
-    # Load the pickle file
-    pickle_path = os.path.join(parent_directory, 'ROI_quant_overview.pkl')
+    # Find the pickle file
+    pickle_path = None
+    for root, _, files in os.walk(parent_directory):
+        for file in files:
+            if file == 'ROI_quant_overview.pkl':
+                pickle_path = os.path.join(root, file)
+                break
+        if pickle_path:
+            break
+    
+    if not pickle_path:
+        print("Error: Could not find ROI_quant_overview.pkl in the specified directory")
+        return
+    
+    # Load the data
     df = load_pickle_data(pickle_path)
     
+    # Create results directory
+    results_dir = create_results_directory(os.path.dirname(pickle_path))
+    
     # Generate the example figure
-    example_output_path = os.path.join(parent_directory, 'example_figure.png')
-    generate_example_figure(df, parent_directory, example_output_path)
+    example_output_path = os.path.join(results_dir, 'example_figure.png')
+    example_data = generate_example_figure(df, parent_directory, example_output_path, results_dir)
     print(f"\nExample figure generated: {example_output_path}")
     
     # Generate the mean traces figure
-    mean_traces_output_path = os.path.join(parent_directory, 'mean_traces_figure.png')
-    generate_mean_traces_figure(df, mean_traces_output_path)
+    mean_traces_output_path = os.path.join(results_dir, 'mean_traces_figure.png')
+    mean_traces_data = generate_mean_traces_figure(df, mean_traces_output_path)
     print(f"Mean traces figure generated: {mean_traces_output_path}")
+    
+    # Export data to Excel
+    output_excel_path = os.path.join(results_dir, 'figures_data.xlsx')
+    export_data_to_excel(example_data, mean_traces_data, output_excel_path)
+    print(f"Data exported to Excel: {output_excel_path}")
 
 if __name__ == "__main__":
     import sys
