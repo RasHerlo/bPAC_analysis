@@ -356,9 +356,9 @@ def add_trace_columns(df, parent_directory):
             
             # Calculate dF/F from cut traces
             df.at[idx, 'ChanA_dFF'] = (df.at[idx, 'ChanA_cut_trc'] - background_values[chan_a_stack_path]) / \
-                                     (np.median(df.at[idx, 'ChanA_cut_trc']) - background_values[chan_a_stack_path])
+                                     (np.percentile(df.at[idx, 'ChanA_cut_trc'], 40) - background_values[chan_a_stack_path])
             df.at[idx, 'ChanB_dFF'] = (df.at[idx, 'ChanB_cut_trc'] - background_values[chan_b_stack_path]) / \
-                                     (np.median(df.at[idx, 'ChanB_cut_trc']) - background_values[chan_b_stack_path])
+                                     (np.percentile(df.at[idx, 'ChanB_cut_trc'], 40) - background_values[chan_b_stack_path])
             
             # Normalize cut traces
             df.at[idx, 'ChanA_norm_trc'] = normalize_trace(chan_a_comp[start_idx:end_idx])
