@@ -141,9 +141,9 @@ def generate_example_figure(df, parent_directory, output_path, results_dir):
     avg_image = create_average_image(stack)
     enhanced_image, vmin, vmax = enhance_contrast(avg_image)
     
-    # Take the top-right 225x225 pixels
+    # Take the top-right 200x150 pixels
     height, width = enhanced_image.shape
-    top_right_corner = enhanced_image[0:225, width-225:width]
+    top_right_corner = enhanced_image[0:150, width-200:width]
     
     # Save the image cutout
     imwrite(os.path.join(results_dir, 'example_roi.tif'), top_right_corner.astype(np.float32))
@@ -168,7 +168,7 @@ def generate_example_figure(df, parent_directory, output_path, results_dir):
     im = ax1.imshow(top_right_corner, cmap='viridis', vmin=vmin, vmax=vmax)
     
     # Calculate ROI position in the new image section
-    roi_x_min = np.min(roi_coords[:, 0]) - (width-225)
+    roi_x_min = np.min(roi_coords[:, 0]) - (width-200)
     roi_y_min = np.min(roi_coords[:, 1])
     
     # Draw dotted rectangle for ROI
@@ -360,6 +360,72 @@ def generate_mean_traces_figure(df, output_path):
         'pinkflamindo_sem': pinkflamindo_sem
     }
 
+def generate_temporal_overlay_figure(mean_traces_data, output_path):
+    """
+    Generate a figure showing normalized mean traces for GCaMP6s and PinkFlamindo.
+    
+    Args:
+        mean_traces_data (dict): Dictionary containing mean traces data
+        output_path (str): Path to save the figure
+        
+    Returns:
+        dict: Dictionary containing the normalized traces data
+    """
+    # Get the time points and mean traces
+    time = mean_traces_data['time']
+    gcamp_mean = mean_traces_data['gcamp_mean']
+    pinkflamindo_mean = mean_traces_data['pinkflamindo_mean']
+    
+    # Normalize GCaMP6s
+    gcamp_norm = (gcamp_mean - 1) / (np.nanmax(gcamp_mean) - 1)
+    
+    # Smooth the traces using LOWESS
+    gcamp_smooth = smooth_trace(gcamp_norm, is_gcamp=True)
+    pinkflamindo_smooth = smooth_trace(pinkflamindo_mean, is_gcamp=False)
+    
+    # Normalize PinkFlamindo based on smoothed curve maximum
+    pinkflamindo_norm = (pinkflamindo_mean - 1) / (np.nanmax(pinkflamindo_smooth) - 1)
+    pinkflamindo_smooth = (pinkflamindo_smooth - 1) / (np.nanmax(pinkflamindo_smooth) - 1)
+    
+    # Create the figure
+    plt.figure(figsize=(8, 6))
+    
+    # Plot the scatter points
+    plt.scatter(time, gcamp_norm, color='green', s=10, alpha=0.5, label='GCaMP6s')
+    plt.scatter(time, pinkflamindo_norm, color='red', s=10, alpha=0.5, label='PinkFlamindo')
+    
+    # Plot the smoothed curves
+    plt.plot(time, gcamp_smooth, 'k-', linewidth=1)
+    plt.plot(time, pinkflamindo_smooth, 'k-', linewidth=1)
+    
+    # Add the cyan box
+    plt.fill_betweenx([0, 1], 0, 2.2, color='cyan', alpha=0.3)
+    
+    # Set plot properties
+    plt.xlabel('Time (s)')
+    plt.ylabel('Normalized dF/F')
+    plt.title('Normalized Temporal Overlay')
+    plt.legend()
+    plt.grid(True)
+    
+    # Set x-axis limits and ticks
+    plt.xlim([-30, 150])
+    plt.xticks([-30, 0, 30, 60, 90, 120, 150])
+    
+    # Save the figure
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    # Return the normalized traces data including smoothed values
+    return {
+        'time': time,
+        'gcamp_norm': gcamp_norm,
+        'pinkflamindo_norm': pinkflamindo_norm,
+        'gcamp_smooth': gcamp_smooth,
+        'pinkflamindo_smooth': pinkflamindo_smooth
+    }
+
 def create_results_directory(pickle_dir):
     """
     Create a results directory in the same location as the pickle file.
@@ -374,13 +440,14 @@ def create_results_directory(pickle_dir):
     os.makedirs(results_dir, exist_ok=True)
     return results_dir
 
-def export_data_to_excel(example_data, mean_traces_data, output_path):
+def export_data_to_excel(example_data, mean_traces_data, norm_traces_data, output_path):
     """
-    Export the data to an Excel file with two sheets.
+    Export the data to an Excel file with three sheets.
     
     Args:
         example_data (dict): Dictionary containing example figure data
         mean_traces_data (dict): Dictionary containing mean traces data
+        norm_traces_data (dict): Dictionary containing normalized traces data
         output_path (str): Path to save the Excel file
     """
     with pd.ExcelWriter(output_path) as writer:
@@ -401,6 +468,16 @@ def export_data_to_excel(example_data, mean_traces_data, output_path):
             'SEM_PinkFlamindo': mean_traces_data['pinkflamindo_sem']
         })
         mean_traces_df.to_excel(writer, sheet_name='mean_traces_figure', index=False)
+        
+        # Normalized traces data
+        norm_traces_df = pd.DataFrame({
+            'Time (s)': norm_traces_data['time'],
+            'GCaMP6s_norm': norm_traces_data['gcamp_norm'],
+            'PinkFl_norm': norm_traces_data['pinkflamindo_norm'],
+            'GCaMP6s_smooth': norm_traces_data['gcamp_smooth'],
+            'PinkFl_smooth': norm_traces_data['pinkflamindo_smooth']
+        })
+        norm_traces_df.to_excel(writer, sheet_name='Norm_Traces', index=False)
 
 def main(parent_directory):
     """
@@ -439,9 +516,14 @@ def main(parent_directory):
     mean_traces_data = generate_mean_traces_figure(df, mean_traces_output_path)
     print(f"Mean traces figure generated: {mean_traces_output_path}")
     
+    # Generate the temporal overlay figure
+    temporal_overlay_path = os.path.join(results_dir, 'temporal_overlay.png')
+    norm_traces_data = generate_temporal_overlay_figure(mean_traces_data, temporal_overlay_path)
+    print(f"Temporal overlay figure generated: {temporal_overlay_path}")
+    
     # Export data to Excel
     output_excel_path = os.path.join(results_dir, 'figures_data.xlsx')
-    export_data_to_excel(example_data, mean_traces_data, output_excel_path)
+    export_data_to_excel(example_data, mean_traces_data, norm_traces_data, output_excel_path)
     print(f"Data exported to Excel: {output_excel_path}")
 
 if __name__ == "__main__":
