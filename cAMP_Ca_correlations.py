@@ -41,7 +41,7 @@ def extract_max_values(df):
     """
     Extract maximum values from ChanA_dFF and ChanB_dFF columns.
     For cAMP (ChanA_dFF), only look between frames 15-60.
-    Excludes ROI#8 from calculations.
+    Excludes ROI#8 from FXX mouse.
     
     Args:
         df (pd.DataFrame): DataFrame containing ROI data
@@ -49,8 +49,8 @@ def extract_max_values(df):
     Returns:
         tuple: Arrays of cAMP and Ca maximum values
     """
-    # Filter out ROI#8
-    df_filtered = df[df['ROI#'] != 8]
+    # Filter out ROI#8 from FXX mouse
+    df_filtered = df[~((df['MOUSE'] == 'FXX') & (df['ROI#'] == 8))]
     
     # Extract maximum values from each row in ChanA_dFF and ChanB_dFF
     cAMP_values = df_filtered['ChanA_dFF'].apply(lambda x: np.max(x[15:60]) if isinstance(x, (list, np.ndarray)) else x)
@@ -105,14 +105,14 @@ def plot_correlation(cAMP_values, Ca_values, output_dir):
 def plot_pairwise_traces(df, output_dir):
     """
     Create a scrollable figure showing pairwise traces of cAMP and Ca signals.
-    Excludes ROI#8 from visualization.
+    Excludes ROI#8 from FXX mouse.
     
     Args:
         df (pd.DataFrame): DataFrame containing ROI data
         output_dir (str): Directory where the plot should be saved
     """
-    # Filter out ROI#8
-    df_filtered = df[df['ROI#'] != 8]
+    # Filter out ROI#8 from FXX mouse
+    df_filtered = df[~((df['MOUSE'] == 'FXX') & (df['ROI#'] == 8))]
     
     # Create a Tkinter window
     root = tk.Tk()
@@ -231,6 +231,17 @@ def main(directory):
     
     # Extract maximum values
     cAMP_values, Ca_values = extract_max_values(df)
+    
+    # Create DataFrame with the values
+    results_df = pd.DataFrame({
+        'cAMP_max': cAMP_values,
+        'Ca_max': Ca_values
+    })
+    
+    # Save to Excel
+    excel_path = os.path.join(pickle_dir, 'cAMP_Ca_max_values.xlsx')
+    results_df.to_excel(excel_path, index=False)
+    print(f"Excel file saved to: {excel_path}")
     
     # Plot the correlation
     plot_correlation(cAMP_values, Ca_values, pickle_dir)
